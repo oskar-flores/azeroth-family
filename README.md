@@ -70,14 +70,15 @@ If the machine struggles, the first dial to turn is bot count
 
 ```
 azeroth-family/
-├── build-and-push.sh      compiles core + module into 3 Docker images
+├── build-and-push.sh      compiles core + modules into 4 Docker images
 ├── docker-compose.yml     the Dokploy stack
 ├── .env.example           what to paste into Dokploy's Environment tab
 ├── family-settings.ini    ← the file you actually edit
 ├── family.env             generated from it; never hand-edit
-├── dokploy-template/      one-click Dokploy template (private/custom source)
+├── dokploy-template/      one-click Dokploy template (custom source, public repo)
 └── scripts/
     ├── ini2env.py         converts .ini keys → AC_* env vars (and self-tests)
+    ├── make-template-compose.py  bakes those vars into the template compose
     └── admin.sh           accounts, console, backups, status
 ```
 
@@ -183,45 +184,57 @@ not by a setting a curious kid could flip.
 
 This repo also ships a Dokploy **template** under `dokploy-template/`, so you can
 install the whole stack from Dokploy's Templates UI without pasting env vars by
-hand. It's a **private/custom** template, not a marketplace contribution: this
-stack publishes raw game TCP ports (auth 3724 / world 8085) and uses locally
-built images, neither of which the public template format allows.
+hand. It's a **custom template source** served from this repo, not a contribution
+to the public Dokploy marketplace: that catalog only hosts HTTP services behind a
+web domain, and this stack publishes raw game TCP ports (auth 3724 / world 8085)
+and runs locally-built images. A custom source sidesteps both limits — Dokploy
+fetches the files straight from here.
 
 ```
 dokploy-template/
-├── meta.json               registry Dokploy reads
-└── azeroth-family/
-    ├── docker-compose.yml  same stack as the repo root
-    ├── template.toml       variables + env (no web domain — it's TCP, not HTTP)
-    ├── family.env          the kid-friendly settings, baked in
-    └── azeroth-family.png  logo
+├── meta.json                          registry Dokploy reads
+└── blueprints/azeroth-family/         Dokploy fetches /blueprints/<id>/
+    ├── docker-compose.yml             self-contained — family.env inlined, conf via ../files/
+    ├── template.toml                  variables + env + the llm-chatter File Mount
+    └── azeroth-family.png             logo
 ```
 
-To use it:
+> Dokploy's fetcher downloads only `template.toml` + `docker-compose.yml` — never
+> `family.env` or `llm-chatter-settings.conf`. So the template carries both inline:
+>
+> - the kid-friendly `AC_*` settings are **inlined** into the worldserver
+>   `environment:` block (they're env vars);
+> - `llm-chatter-settings.conf` (public, no secrets) is embedded as a Dokploy
+>   **File Mount** (`[[config.mounts]]` in `template.toml`), and the compose mounts
+>   it from Dokploy's `/files` dir as `../files/llm-chatter-settings.conf`.
+>
+> `scripts/make-template-compose.py` regenerates both from the repo-root stack.
+> ⚠️ The `../files/` path is straight from the Dokploy docs; if the bridge can't
+> find the conf after install, flip it to `./files/` (one token in the generator) —
+> it's the one thing that can't be checked without a live Dokploy instance.
 
-1. Make the `dokploy-template/` path reachable by Dokploy's template fetch.
-   Dokploy pulls templates over an **unauthenticated** HTTP GET, so the path must
-   be publicly readable. This repo is private, so either copy the folder into a
-   small **public** repo (or a GitHub gist) and point Dokploy there, or make this
-   repo public.
-2. In Dokploy → **Settings → Templates**, add a custom template source whose base
-   URL is the raw path to that folder, e.g.
-   `https://raw.githubusercontent.com/<you>/<public-repo>/main/dokploy-template`.
-3. "Azeroth Family Server" appears under Templates. Install it, set
-   `realm_address` to your Tailscale IP (`tailscale ip -4`), and deploy.
+To use it. Dokploy's fetch is an **unauthenticated** HTTP GET, so the repo has to
+be public — which it is:
 
-First-class support for *private* template sources is tracked at
-[Dokploy #2414](https://github.com/Dokploy/dokploy/issues/2414); once your
-Dokploy version supports an authenticated source you can skip step 1 and point
-it straight at this private repo. The same images must already exist on the host
-(build first with `./build-and-push.sh`).
+1. In Dokploy → **Settings → Templates**, add a custom template source with this
+   base URL (no trailing slash):
+   ```
+   https://raw.githubusercontent.com/oskar-flores/azeroth-family/main/dokploy-template
+   ```
+2. "Azeroth Family Server" appears under Templates. Install it, set
+   `realm_address` to your Tailscale IP (`tailscale ip -4`) and
+   `anthropic_api_key` to your Anthropic key (for bot chat), and deploy.
 
-When you change `family-settings.ini`, regenerate and refresh the baked-in copy
-so the template stays in sync:
+The images must already exist on the host — build first with
+`./build-and-push.sh` (or set `image_prefix` to a registry you've pushed to).
+
+When you change `family-settings.ini` or `llm-chatter-settings.conf`, rebuild the
+template so it stays in sync (the generator inlines the former and re-embeds the
+latter as a File Mount):
 
 ```bash
 python3 scripts/ini2env.py family-settings.ini > family.env
-cp family.env dokploy-template/azeroth-family/family.env
+python3 scripts/make-template-compose.py
 ```
 
 First deploy takes ~20 minutes: `ac-client-data-init` downloads ~16 GB of map
@@ -398,7 +411,6 @@ happily fold its advice in.
 [worldserver.conf.dist](https://github.com/mod-playerbots/azerothcore-wotlk/blob/Playerbot/src/server/apps/worldserver/worldserver.conf.dist) ·
 [AzerothCore install with Docker](https://www.azerothcore.org/wiki/install-with-docker) ·
 [Dokploy Compose docs](https://docs.dokploy.com/docs/core/docker-compose/domains) ·
-[Dokploy template format](https://github.com/Dokploy/templates/blob/canary/_autodocs/template-format.md) ·
-[Dokploy custom/private templates #2414](https://github.com/Dokploy/dokploy/issues/2414) ·
+[Dokploy template format](https://github.com/Dokploy/templates/blob/main/README.md) ·
 [Non-HTTP services: ports vs expose #640](https://github.com/Dokploy/templates/issues/640) ·
 [hxhieu image tags](https://hub.docker.com/r/hxhieu/ac-wotlk-worldserver/tags)

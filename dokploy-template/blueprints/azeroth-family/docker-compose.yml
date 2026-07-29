@@ -137,10 +137,6 @@ services:
     stdin_open: true
     tty: true
     networks: [ac-network]
-    env_file:
-      # All the family/kid settings live here. Generated from family-settings.ini
-      # by scripts/ini2env.py -- never hand-edit.
-      - ./family.env
     environment:
       AC_DATA_DIR: "/azerothcore/env/dist/data"
       AC_LOGS_DIR: "/azerothcore/env/dist/logs"
@@ -148,18 +144,117 @@ services:
       AC_WORLD_DATABASE_INFO: "ac-database;3306;root;${DB_ROOT_PASSWORD};acore_world"
       AC_CHARACTER_DATABASE_INFO: "ac-database;3306;root;${DB_ROOT_PASSWORD};acore_characters"
       AC_PLAYERBOTS_DATABASE_INFO: "ac-database;3306;root;${DB_ROOT_PASSWORD};acore_playerbots"
+      AC_GAME_TYPE: "0"
+      AC_REALM_ZONE: "1"
+      AC_MOTD: "Bienvenidos a Azeroth! Escribe .help para ver los comandos."
+      AC_DBC_LOCALE: "255"
+      AC_MAP_UPDATE_THREADS: "4"
+      AC_WARDEN_ENABLED: "0"
+      AC_CLOSE_IDLE_CONNECTIONS: "0"
+      AC_SERVER_LOGIN_INFO: "1"
+      AC_RATE_XP_KILL: "3"
+      AC_RATE_XP_QUEST: "3"
+      AC_RATE_XP_QUEST_DF: "3"
+      AC_RATE_XP_EXPLORE: "3"
+      AC_RATE_XP_PET: "3"
+      AC_RATE_DROP_MONEY: "3"
+      AC_RATE_REST_IN_GAME: "3"
+      AC_RATE_REST_OFFLINE_IN_TAVERN_OR_CITY: "3"
+      AC_RATE_REPUTATION_GAIN: "2"
+      AC_RATE_DROP_ITEM_UNCOMMON: "2"
+      AC_RATE_DROP_ITEM_RARE: "2"
+      AC_RATE_DROP_ITEM_EPIC: "2"
+      AC_DEATH_SICKNESS_LEVEL: "100"
+      AC_DEATH_CORPSE_RECLAIM_DELAY_PV_E: "0"
+      AC_DEATH_CORPSE_RECLAIM_DELAY_PV_P: "0"
+      AC_DURABILITY_LOSS_ON_DEATH: "0"
+      AC_DURABILITY_LOSS_ON_SPIRIT_RESURRECT: "0"
+      AC_DURABILITY_LOSS_IN_PV_P: "0"
+      AC_DURABILITY_LOSS_CHANCE_DAMAGE: "0"
+      AC_DURABILITY_LOSS_CHANCE_ABSORB: "0"
+      AC_DURABILITY_LOSS_CHANCE_PARRY: "0"
+      AC_DURABILITY_LOSS_CHANCE_BLOCK: "0"
+      AC_RATE_DAMAGE_FALL: "0"
+      AC_DISABLE_WATER_BREATH: "0"
+      AC_ALL_FLIGHT_PATHS: "1"
+      AC_INSTANT_FLIGHT_PATHS: "2"
+      AC_QUESTS_IGNORE_RAID: "1"
+      AC_LEAVE_GROUP_ON_LOGOUT_ENABLED: "0"
+      AC_AI_PLAYERBOT_ENABLED: "1"
+      AC_AI_PLAYERBOT_MIN_RANDOM_BOTS: "150"
+      AC_AI_PLAYERBOT_MAX_RANDOM_BOTS: "150"
+      AC_AI_PLAYERBOT_RANDOM_BOT_ACCOUNT_COUNT: "0"
+      AC_AI_PLAYERBOT_RANDOM_BOT_AUTOLOGIN: "1"
+      AC_AI_PLAYERBOT_DISABLED_WITHOUT_REAL_PLAYER: "1"
+      AC_AI_PLAYERBOT_DISABLED_WITHOUT_REAL_PLAYER_LOGIN_DELAY: "15"
+      AC_AI_PLAYERBOT_DISABLED_WITHOUT_REAL_PLAYER_LOGOUT_DELAY: "120"
+      AC_AI_PLAYERBOT_MAX_ADDED_BOTS: "4"
+      AC_AI_PLAYERBOT_RANDOM_BOT_MIN_LEVEL: "1"
+      AC_AI_PLAYERBOT_RANDOM_BOT_MAX_LEVEL: "80"
+      AC_AI_PLAYERBOT_RANDOM_BOT_JOIN_BG: "0"
+      AC_AI_PLAYERBOT_RANDOM_BOT_JOIN_LFG: "1"
+      AC_AI_PLAYERBOT_INVITE_CHAT: "0"
+      AC_AI_PLAYERBOT_SUMMON_WHEN_GROUP: "1"
+      AC_AI_PLAYERBOT_SELF_BOT_LEVEL: "2"
+      AC_AI_PLAYERBOT_BROADCAST_CHANCE_SUGGEST_SOMETHING_TOXIC: "0"
+      AC_AI_PLAYERBOT_BROADCAST_CHANCE_SUGGEST_TOXIC_LINKS: "0"
+      AC_AI_PLAYERBOT_TOXIC_LINKS_REPLIES_CHANCE: "0"
+      AC_AI_PLAYERBOT_THUNDERFURY_REPLIES_CHANCE: "0"
+      AC_AI_PLAYERBOT_BROADCAST_CHANCE_SUGGEST_THUNDERFURY: "0"
+      AC_AI_PLAYERBOT_RANDOM_BOT_TALK: "0"
+      AC_AI_PLAYERBOT_ENABLE_BROADCASTS: "0"
+      AC_AI_PLAYERBOT_RANDOM_BOT_EMOTE: "0"
+      AC_AI_PLAYERBOT_RANDOM_BOT_SUGGEST_DUNGEONS: "0"
+      AC_AI_PLAYERBOT_ENABLE_GREET: "0"
+      AC_AI_PLAYERBOT_RANDOM_BOT_SAY_WITHOUT_MASTER: "0"
     ports:
       - "${BIND_ADDR:-0.0.0.0}:${WORLD_PORT:-8085}:8085"
     volumes:
       - ac-etc:/azerothcore/env/dist/etc
       - ac-logs:/azerothcore/env/dist/logs
       - ac-client-data:/azerothcore/env/dist/data:ro
+      # The C++ half of mod-llm-chatter reads ~100 keys from here. Anything not
+      # listed in the file falls back to the compiled-in default, which is why
+      # we can ship deltas only. No API key is in this file.
+      - ../files/llm-chatter-settings.conf:/azerothcore/env/dist/etc/modules/mod_llm_chatter.conf:ro
     depends_on:
       ac-database:
         condition: service_healthy
       ac-realm-config:
         condition: service_completed_successfully
       ac-client-data-init:
+        condition: service_completed_successfully
+
+  # ------------------------------------------------------- llm chatter bridge
+  # The Python half of mod-llm-chatter. It is deliberately NOT in the game
+  # process: the worldserver drops event rows into acore_characters and moves
+  # on, the bridge polls them, calls the API, and writes replies back for
+  # delivery on the next world tick. No API call ever blocks the server.
+  #
+  # Provider is set in llm-chatter-settings.conf, not here. Switching from
+  # Anthropic to a local Ollama box later is that file plus a restart of this
+  # one container -- the images do not change.
+  ac-llm-chatter-bridge:
+    image: ${IMAGE_PREFIX:-azeroth-family}/llm-chatter-bridge:${IMAGE_TAG:-latest}
+    container_name: ac-llm-chatter-bridge
+    restart: unless-stopped
+    networks: [ac-network]
+    environment:
+      # Assembled into the config at container start. Never written to git.
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:?set ANTHROPIC_API_KEY in Dokploy}
+      DB_ROOT_PASSWORD: ${DB_ROOT_PASSWORD}
+    volumes:
+      - ../files/llm-chatter-settings.conf:/config/llm-chatter-settings.conf:ro
+      # The audit log lands here: /logs/llm_requests.jsonl. Read it.
+      - ac-logs:/logs
+    depends_on:
+      ac-database:
+        condition: service_healthy
+      # The bridge does NOT create its own tables -- it expects the module's
+      # character schema to exist already. db-import applies it from
+      # modules/mod-llm-chatter/data/sql/characters/base/. Starting the bridge
+      # against a fresh database before that runs is the documented failure.
+      ac-db-import:
         condition: service_completed_successfully
 
 volumes:
