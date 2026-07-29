@@ -154,12 +154,48 @@ services:
       - ac-etc:/azerothcore/env/dist/etc
       - ac-logs:/azerothcore/env/dist/logs
       - ac-client-data:/azerothcore/env/dist/data:ro
+      # The C++ half of mod-llm-chatter reads ~100 keys from here. Anything not
+      # listed in the file falls back to the compiled-in default, which is why
+      # we can ship deltas only. No API key is in this file.
+      - ./llm-chatter-settings.conf:/azerothcore/env/dist/etc/modules/mod_llm_chatter.conf:ro
     depends_on:
       ac-database:
         condition: service_healthy
       ac-realm-config:
         condition: service_completed_successfully
       ac-client-data-init:
+        condition: service_completed_successfully
+
+  # ------------------------------------------------------- llm chatter bridge
+  # The Python half of mod-llm-chatter. It is deliberately NOT in the game
+  # process: the worldserver drops event rows into acore_characters and moves
+  # on, the bridge polls them, calls the API, and writes replies back for
+  # delivery on the next world tick. No API call ever blocks the server.
+  #
+  # Provider is set in llm-chatter-settings.conf, not here. Switching from
+  # Anthropic to a local Ollama box later is that file plus a restart of this
+  # one container -- the images do not change.
+  ac-llm-chatter-bridge:
+    image: ${IMAGE_PREFIX:-azeroth-family}/llm-chatter-bridge:${IMAGE_TAG:-latest}
+    container_name: ac-llm-chatter-bridge
+    restart: unless-stopped
+    networks: [ac-network]
+    environment:
+      # Assembled into the config at container start. Never written to git.
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:?set ANTHROPIC_API_KEY in Dokploy}
+      DB_ROOT_PASSWORD: ${DB_ROOT_PASSWORD}
+    volumes:
+      - ./llm-chatter-settings.conf:/config/llm-chatter-settings.conf:ro
+      # The audit log lands here: /logs/llm_requests.jsonl. Read it.
+      - ac-logs:/logs
+    depends_on:
+      ac-database:
+        condition: service_healthy
+      # The bridge does NOT create its own tables -- it expects the module's
+      # character schema to exist already. db-import applies it from
+      # modules/mod-llm-chatter/data/sql/characters/base/. Starting the bridge
+      # against a fresh database before that runs is the documented failure.
+      ac-db-import:
         condition: service_completed_successfully
 
 volumes:

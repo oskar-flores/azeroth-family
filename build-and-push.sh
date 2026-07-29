@@ -22,7 +22,8 @@ set -euo pipefail
 REGISTRY="${REGISTRY:-}"
 
 TAG="${TAG:-latest}"
-SRC_DIR="${SRC_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/src}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SRC_DIR="${SRC_DIR:-$SCRIPT_DIR/src}"
 
 CORE_REPO="https://github.com/mod-playerbots/azerothcore-wotlk.git"
 CORE_BRANCH="Playerbot"
@@ -33,6 +34,12 @@ MODULE_BRANCH="master"
 # Each one you add is another thing that can break the build -- add them one at
 # a time and rebuild in between.
 EXTRA_MODULES=(
+  # LLM-driven bot chat. Replaces playerbots' built-in chat with generated
+  # dialogue in Spanish. The C++ half compiles in here; the Python half runs
+  # as the separate ac-llm-chatter-bridge image built at the end of this
+  # script. Provider (Anthropic now, local Ollama later) is a runtime setting
+  # in llm-chatter-settings.conf -- switching does NOT need another build.
+  "mod-llm-chatter|https://github.com/Hokken/mod-llm-chatter.git|master"
   # "mod-aoe-loot|https://github.com/azerothcore/mod-aoe-loot.git|master"
   # "mod-learn-spells|https://github.com/noisiver/mod-learn-spells.git|master"
   # "mod-fireworks-on-level|https://github.com/azerothcore/mod-fireworks-on-level.git|master"
@@ -161,6 +168,36 @@ build_target worldserver worldserver
 build_target authserver  authserver
 build_target db-import   db-import
 
+# ------------------------------------------------------- llm-chatter bridge
+
+# Not part of the core Dockerfile: this is the module's Python half, which
+# upstream expects you to run from a bind-mounted source tree. Dokploy has no
+# source tree, so it gets its own image. Seconds to build, not hours -- it is
+# a pip install, no compilation.
+build_bridge() {
+  local mod_dir="$CORE_DIR/modules/mod-llm-chatter"
+  local dockerfile="$SCRIPT_DIR/docker/llm-chatter-bridge.Dockerfile"
+  local image="azeroth-family/llm-chatter-bridge:$TAG"
+  [[ -n "$REGISTRY" ]] && image="$REGISTRY/llm-chatter-bridge:$TAG"
+
+  [[ -d "$mod_dir" ]] || die "mod-llm-chatter is not cloned -- is it still in EXTRA_MODULES?"
+  [[ -f "$dockerfile" ]] || die "missing $dockerfile"
+
+  log "Building $image"
+  DOCKER_BUILDKIT=1 docker build \
+    --file "$dockerfile" \
+    --tag "$image" \
+    "$mod_dir"
+
+  if (( DO_PUSH )); then
+    [[ -n "$REGISTRY" ]] || die "--push needs REGISTRY to be set"
+    log "Pushing $image"
+    docker push "$image"
+  fi
+}
+
+build_bridge
+
 log "Done"
 cat <<EOF
 
@@ -168,6 +205,8 @@ Images built:
   $( [[ -n "$REGISTRY" ]] && echo "$REGISTRY" || echo "azeroth-family" )/worldserver:$TAG
   $( [[ -n "$REGISTRY" ]] && echo "$REGISTRY" || echo "azeroth-family" )/authserver:$TAG
   $( [[ -n "$REGISTRY" ]] && echo "$REGISTRY" || echo "azeroth-family" )/db-import:$TAG
+  $( [[ -n "$REGISTRY" ]] && echo "$REGISTRY" || echo "azeroth-family" )/llm-chatter-bridge:$TAG
 
 Next: set IMAGE_PREFIX and IMAGE_TAG in Dokploy's environment to match, then deploy.
+Also set ANTHROPIC_API_KEY -- the bridge refuses to start without it.
 EOF
