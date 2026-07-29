@@ -6,8 +6,8 @@
 # once here and hand finished images to Dokploy. Dokploy never compiles anything.
 #
 #   ./build-and-push.sh              build locally, tag as azeroth-family/*
-#   ./build-and-push.sh --push       also push to $REGISTRY
-#   ./build-and-push.sh --update     git pull core + module first, then build
+#   ./build-and-push.sh --push       also push to $REGISTRY (needs docker login)
+#   ./build-and-push.sh --update     git pull core + modules first, then build
 #
 # First build: 40-90 min and it wants ~8 GB RAM free. Later builds reuse ccache
 # and are much faster.
@@ -18,11 +18,12 @@ set -euo pipefail
 
 # Where to push. Leave empty if Dokploy runs on THIS machine -- then the images
 # are already in the local Docker daemon and no registry is involved at all.
-#   e.g. REGISTRY=ghcr.io/oskarflores
+#   e.g. REGISTRY=ghcr.io/oskar-flores
 REGISTRY="${REGISTRY:-}"
 
 TAG="${TAG:-latest}"
-SRC_DIR="${SRC_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/src}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SRC_DIR="${SRC_DIR:-$SCRIPT_DIR/src}"
 
 CORE_REPO="https://github.com/mod-playerbots/azerothcore-wotlk.git"
 CORE_BRANCH="Playerbot"
@@ -33,6 +34,12 @@ MODULE_BRANCH="master"
 # Each one you add is another thing that can break the build -- add them one at
 # a time and rebuild in between.
 EXTRA_MODULES=(
+  # LLM-driven bot chat. Replaces playerbots' built-in chat with generated
+  # dialogue in Spanish. The C++ half compiles in here; the Python half runs
+  # as the separate ac-llm-chatter-bridge image built at the end of this
+  # script. Provider (Anthropic now, local Ollama later) is a runtime setting
+  # in llm-chatter-settings.conf -- switching does NOT need another build.
+  "mod-llm-chatter|https://github.com/Hokken/mod-llm-chatter.git|master"
   # "mod-aoe-loot|https://github.com/azerothcore/mod-aoe-loot.git|master"
   # "mod-learn-spells|https://github.com/noisiver/mod-learn-spells.git|master"
   # "mod-fireworks-on-level|https://github.com/azerothcore/mod-fireworks-on-level.git|master"
@@ -68,6 +75,22 @@ if [[ -r /proc/meminfo ]]; then
   (( mem_gb >= 8 )) || warn "only ${mem_gb} GB RAM detected; the C++ build may OOM. Consider lowering parallelism."
 fi
 
+# Everything about --push is checked HERE, before the 40-90 minute compile.
+# These used to live inside build_target, which meant a missing REGISTRY was
+# reported after the longest build in the script had already finished.
+if (( DO_PUSH )); then
+  [[ -n "$REGISTRY" ]] \
+    || die "--push needs REGISTRY, e.g. REGISTRY=ghcr.io/oskar-flores ./build-and-push.sh --push"
+
+  # Not being logged in wastes exactly as much time. Only a warning: credential
+  # helpers keep auths out of config.json, so absence here is not proof.
+  registry_host="${REGISTRY%%/*}"
+  if [[ -r "$HOME/.docker/config.json" ]] \
+     && ! grep -q "\"$registry_host\"" "$HOME/.docker/config.json"; then
+    warn "no stored credentials for $registry_host -- if the push fails, run: docker login $registry_host"
+  fi
+fi
+
 # ---------------------------------------------------------------- fetch sources
 
 clone_or_update() {
@@ -93,47 +116,41 @@ mkdir -p "$SRC_DIR"
 clone_or_update "$CORE_DIR" "$CORE_REPO" "$CORE_BRANCH"
 clone_or_update "$CORE_DIR/modules/mod-playerbots" "$MODULE_REPO" "$MODULE_BRANCH"
 
-for spec in "${EXTRA_MODULES[@]}"; do
-  IFS='|' read -r name url branch <<<"$spec"
-  clone_or_update "$CORE_DIR/modules/$name" "$url" "$branch"
-done
+# The length check is not optional: on bash 3.2 (the macOS system bash, which is
+# what `env bash` finds here) expanding an empty array under `set -u` is an
+# "unbound variable" error, not an empty expansion.
+if (( ${#EXTRA_MODULES[@]} )); then
+  for spec in "${EXTRA_MODULES[@]}"; do
+    IFS='|' read -r name url branch <<<"$spec"
+    clone_or_update "$CORE_DIR/modules/$name" "$url" "$branch"
+  done
+fi
 
 # Sanity check: are we really on the fork?
 origin_url=$(git -C "$CORE_DIR" remote get-url origin)
 [[ "$origin_url" == *"mod-playerbots/azerothcore-wotlk"* ]] \
   || die "core at $CORE_DIR points at $origin_url -- it must be the mod-playerbots fork"
 
-# ------------------------------------------------------- stage module SQL files
+# ------------------------------------------------------------ verify module SQL
 
-# The db-import container only picks up SQL it finds under data/sql/custom/.
-# Without this you get 'Unknown database acore_playerbots' or missing-table
-# errors on first boot. The module has moved this directory around between
-# versions, so check both known locations.
-log "Staging module SQL into data/sql/custom/"
-mkdir -p "$CORE_DIR/data/sql/custom/db_characters" \
-         "$CORE_DIR/data/sql/custom/db_world" \
-         "$CORE_DIR/data/sql/custom/db_auth"
-
-staged=0
+# Do NOT copy module SQL into data/sql/custom/. dbimport already finds it in
+# modules/<mod>/data/sql/ (Updates.AllowedModules=all resolves to the compiled-in
+# AC_MODULES_LIST), and data/sql/custom/db_* is itself a seeded include dir. A
+# copy in both places is the same filename twice, and UpdateFetcher dedupes on
+# filename alone -- it logs "Duplicate filename" and aborts the whole import.
+log "Checking module SQL"
 for base in "$CORE_DIR/modules"/*/; do
+  [[ -d "$base" ]] || continue
   mod=$(basename "$base")
-  for sub in "data/sql" "sql"; do
-    for db in characters world auth; do
-      for variant in "base" "updates" ""; do
-        dir="$base$sub/$db/$variant"
-        [[ -d "$dir" ]] || continue
-        shopt -s nullglob
-        files=("$dir"/*.sql)
-        shopt -u nullglob
-        (( ${#files[@]} )) || continue
-        cp -f "${files[@]}" "$CORE_DIR/data/sql/custom/db_$db/"
-        staged=$(( staged + ${#files[@]} ))
-        echo "    $mod: ${#files[@]} file(s) -> db_$db"
-      done
-    done
-  done
+  [[ -d "$base/data/sql" ]] || continue
+  n=$(find "$base/data/sql" -name '*.sql' | wc -l | tr -d ' ')
+  echo "    $mod: $n SQL file(s) (applied by dbimport from modules/)"
 done
-(( staged )) || warn "no module SQL files found -- if the world server complains about missing playerbots tables, check the module layout"
+
+# This is the schema for acore_playerbots specifically. Missing it is the real
+# cause of 'Unknown database acore_playerbots' on first boot.
+[[ -d "$CORE_DIR/modules/mod-playerbots/data/sql/playerbots/base" ]] \
+  || die "mod-playerbots is missing data/sql/playerbots/base -- the acore_playerbots schema will not be created"
 
 # ------------------------------------------------------------------- build images
 
@@ -154,8 +171,8 @@ build_target() {
     --build-arg TZ="${TZ:-Europe/Madrid}" \
     "$CORE_DIR"
 
+  # REGISTRY is already validated in preflight, so this is just the push.
   if (( DO_PUSH )); then
-    [[ -n "$REGISTRY" ]] || die "--push needs REGISTRY to be set"
     log "Pushing $image"
     docker push "$image"
   fi
@@ -167,6 +184,35 @@ build_target worldserver worldserver
 build_target authserver  authserver
 build_target db-import   db-import
 
+# ------------------------------------------------------- llm-chatter bridge
+
+# Not part of the core Dockerfile: this is the module's Python half, which
+# upstream expects you to run from a bind-mounted source tree. Dokploy has no
+# source tree, so it gets its own image. Seconds to build, not hours -- it is
+# a pip install, no compilation.
+build_bridge() {
+  local mod_dir="$CORE_DIR/modules/mod-llm-chatter"
+  local dockerfile="$SCRIPT_DIR/docker/llm-chatter-bridge.Dockerfile"
+  local image="azeroth-family/llm-chatter-bridge:$TAG"
+  [[ -n "$REGISTRY" ]] && image="$REGISTRY/llm-chatter-bridge:$TAG"
+
+  [[ -d "$mod_dir" ]] || die "mod-llm-chatter is not cloned -- is it still in EXTRA_MODULES?"
+  [[ -f "$dockerfile" ]] || die "missing $dockerfile"
+
+  log "Building $image"
+  DOCKER_BUILDKIT=1 docker build \
+    --file "$dockerfile" \
+    --tag "$image" \
+    "$mod_dir"
+
+  if (( DO_PUSH )); then
+    log "Pushing $image"
+    docker push "$image"
+  fi
+}
+
+build_bridge
+
 log "Done"
 cat <<EOF
 
@@ -174,6 +220,8 @@ Images built:
   $( [[ -n "$REGISTRY" ]] && echo "$REGISTRY" || echo "azeroth-family" )/worldserver:$TAG
   $( [[ -n "$REGISTRY" ]] && echo "$REGISTRY" || echo "azeroth-family" )/authserver:$TAG
   $( [[ -n "$REGISTRY" ]] && echo "$REGISTRY" || echo "azeroth-family" )/db-import:$TAG
+  $( [[ -n "$REGISTRY" ]] && echo "$REGISTRY" || echo "azeroth-family" )/llm-chatter-bridge:$TAG
 
 Next: set IMAGE_PREFIX and IMAGE_TAG in Dokploy's environment to match, then deploy.
+Also set ANTHROPIC_API_KEY -- the bridge refuses to start without it.
 EOF
