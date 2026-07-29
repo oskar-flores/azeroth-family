@@ -93,47 +93,41 @@ mkdir -p "$SRC_DIR"
 clone_or_update "$CORE_DIR" "$CORE_REPO" "$CORE_BRANCH"
 clone_or_update "$CORE_DIR/modules/mod-playerbots" "$MODULE_REPO" "$MODULE_BRANCH"
 
-for spec in "${EXTRA_MODULES[@]}"; do
-  IFS='|' read -r name url branch <<<"$spec"
-  clone_or_update "$CORE_DIR/modules/$name" "$url" "$branch"
-done
+# The length check is not optional: on bash 3.2 (the macOS system bash, which is
+# what `env bash` finds here) expanding an empty array under `set -u` is an
+# "unbound variable" error, not an empty expansion.
+if (( ${#EXTRA_MODULES[@]} )); then
+  for spec in "${EXTRA_MODULES[@]}"; do
+    IFS='|' read -r name url branch <<<"$spec"
+    clone_or_update "$CORE_DIR/modules/$name" "$url" "$branch"
+  done
+fi
 
 # Sanity check: are we really on the fork?
 origin_url=$(git -C "$CORE_DIR" remote get-url origin)
 [[ "$origin_url" == *"mod-playerbots/azerothcore-wotlk"* ]] \
   || die "core at $CORE_DIR points at $origin_url -- it must be the mod-playerbots fork"
 
-# ------------------------------------------------------- stage module SQL files
+# ------------------------------------------------------------ verify module SQL
 
-# The db-import container only picks up SQL it finds under data/sql/custom/.
-# Without this you get 'Unknown database acore_playerbots' or missing-table
-# errors on first boot. The module has moved this directory around between
-# versions, so check both known locations.
-log "Staging module SQL into data/sql/custom/"
-mkdir -p "$CORE_DIR/data/sql/custom/db_characters" \
-         "$CORE_DIR/data/sql/custom/db_world" \
-         "$CORE_DIR/data/sql/custom/db_auth"
-
-staged=0
+# Do NOT copy module SQL into data/sql/custom/. dbimport already finds it in
+# modules/<mod>/data/sql/ (Updates.AllowedModules=all resolves to the compiled-in
+# AC_MODULES_LIST), and data/sql/custom/db_* is itself a seeded include dir. A
+# copy in both places is the same filename twice, and UpdateFetcher dedupes on
+# filename alone -- it logs "Duplicate filename" and aborts the whole import.
+log "Checking module SQL"
 for base in "$CORE_DIR/modules"/*/; do
+  [[ -d "$base" ]] || continue
   mod=$(basename "$base")
-  for sub in "data/sql" "sql"; do
-    for db in characters world auth; do
-      for variant in "base" "updates" ""; do
-        dir="$base$sub/$db/$variant"
-        [[ -d "$dir" ]] || continue
-        shopt -s nullglob
-        files=("$dir"/*.sql)
-        shopt -u nullglob
-        (( ${#files[@]} )) || continue
-        cp -f "${files[@]}" "$CORE_DIR/data/sql/custom/db_$db/"
-        staged=$(( staged + ${#files[@]} ))
-        echo "    $mod: ${#files[@]} file(s) -> db_$db"
-      done
-    done
-  done
+  [[ -d "$base/data/sql" ]] || continue
+  n=$(find "$base/data/sql" -name '*.sql' | wc -l | tr -d ' ')
+  echo "    $mod: $n SQL file(s) (applied by dbimport from modules/)"
 done
-(( staged )) || warn "no module SQL files found -- if the world server complains about missing playerbots tables, check the module layout"
+
+# This is the schema for acore_playerbots specifically. Missing it is the real
+# cause of 'Unknown database acore_playerbots' on first boot.
+[[ -d "$CORE_DIR/modules/mod-playerbots/data/sql/playerbots/base" ]] \
+  || die "mod-playerbots is missing data/sql/playerbots/base -- the acore_playerbots schema will not be created"
 
 # ------------------------------------------------------------------- build images
 
