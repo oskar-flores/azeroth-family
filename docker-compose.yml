@@ -1,0 +1,172 @@
+# =============================================================================
+#  Azeroth family server -- Dokploy stack
+# =============================================================================
+#  Deploy this as a Dokploy "Docker Compose" application.
+#  Nothing here compiles anything; build-and-push.sh already produced the images.
+#
+#  First deploy takes ~20 min: ac-client-data-init downloads ~16 GB of maps and
+#  ac-db-import builds the databases. Both only run once.
+# =============================================================================
+
+services:
+
+  # ---------------------------------------------------------------- database
+  ac-database:
+    image: mysql:8.4
+    container_name: ac-database
+    restart: unless-stopped
+    networks: [ac-network]
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:?set DB_ROOT_PASSWORD in Dokploy}
+    # Default MySQL settings are not adequate for playerbots and cause constant
+    # disk thrashing. These are the tuning values the module documents.
+    command: >
+      --skip-log-bin
+      --innodb-buffer-pool-size=${DB_BUFFER_POOL:-2G}
+      --innodb-io-capacity=500
+      --innodb-io-capacity-max=2500
+      --transaction-isolation=READ-COMMITTED
+    volumes:
+      - ac-database:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysql --user=root --password=$$MYSQL_ROOT_PASSWORD --execute 'SHOW DATABASES;'"]
+      interval: 5s
+      timeout: 10s
+      retries: 40
+
+  # ------------------------------------------------- client data (runs once)
+  # Downloads the prebuilt maps/vmaps/mmaps/dbc into a volume. This is the
+  # official AzerothCore data image -- the map data is not fork-specific, and
+  # it ships enUS dbc files, which is exactly what playerbots requires.
+  ac-client-data-init:
+    image: acore/ac-wotlk-client-data:${CLIENT_DATA_TAG:-master}
+    container_name: ac-client-data-init
+    networks: [ac-network]
+    volumes:
+      - ac-client-data:/azerothcore/env/dist/data
+
+  # -------------------------------------------------- db import (runs once)
+  ac-db-import:
+    image: ${IMAGE_PREFIX:-azeroth-family}/db-import:${IMAGE_TAG:-latest}
+    container_name: ac-db-import
+    networks: [ac-network]
+    environment:
+      AC_DATA_DIR: "/azerothcore/env/dist/data"
+      AC_LOGS_DIR: "/azerothcore/env/dist/logs"
+      AC_LOGIN_DATABASE_INFO: "ac-database;3306;root;${DB_ROOT_PASSWORD};acore_auth"
+      AC_WORLD_DATABASE_INFO: "ac-database;3306;root;${DB_ROOT_PASSWORD};acore_world"
+      AC_CHARACTER_DATABASE_INFO: "ac-database;3306;root;${DB_ROOT_PASSWORD};acore_characters"
+      AC_PLAYERBOTS_DATABASE_INFO: "ac-database;3306;root;${DB_ROOT_PASSWORD};acore_playerbots"
+    volumes:
+      - ac-etc:/azerothcore/env/dist/etc
+      - ac-logs:/azerothcore/env/dist/logs
+    depends_on:
+      ac-database:
+        condition: service_healthy
+
+  # ------------------------------------------- realm address (runs each boot)
+  # Two jobs, both of which are otherwise silent footguns:
+  #  1. create acore_playerbots, which the normal importer does not always make
+  #  2. point the realm at an address your family's clients can actually reach
+  #     -- the default is 127.0.0.1, which means "connects fine, then hangs at
+  #     the character screen forever". This is THE classic private-server bug.
+  ac-realm-config:
+    image: mysql:8.4
+    container_name: ac-realm-config
+    networks: [ac-network]
+    environment:
+      MYSQL_PWD: ${DB_ROOT_PASSWORD}
+      REALM_NAME: ${REALM_NAME:-Azeroth Familiar}
+      REALM_ADDRESS: ${REALM_ADDRESS:?set REALM_ADDRESS to your Tailscale IP}
+    entrypoint: ["bash", "-c"]
+    command:
+      - |
+        set -e
+        mysql -h ac-database -u root -e "CREATE DATABASE IF NOT EXISTS acore_playerbots;"
+        mysql -h ac-database -u root acore_auth -e "
+          UPDATE realmlist
+             SET name         = '$${REALM_NAME}',
+                 address      = '$${REALM_ADDRESS}',
+                 localAddress = '$${REALM_ADDRESS}',
+                 port         = 8085,
+                 flag         = 0,
+                 gamebuild    = 12340
+           WHERE id = 1;"
+        echo "realm 1 -> $${REALM_ADDRESS}:8085"
+        mysql -h ac-database -u root acore_auth -e "SELECT id, name, address, port FROM realmlist;"
+    depends_on:
+      ac-db-import:
+        condition: service_completed_successfully
+
+  # --------------------------------------------------------------- authserver
+  # Handles login only. Small and quiet. Port 3724 is what the client's
+  # realmlist.wtf points at.
+  ac-authserver:
+    image: ${IMAGE_PREFIX:-azeroth-family}/authserver:${IMAGE_TAG:-latest}
+    container_name: ac-authserver
+    restart: unless-stopped
+    tty: true
+    networks: [ac-network]
+    environment:
+      AC_LOGS_DIR: "/azerothcore/env/dist/logs"
+      AC_TEMP_DIR: "/azerothcore/env/dist/temp"
+      AC_LOGIN_DATABASE_INFO: "ac-database;3306;root;${DB_ROOT_PASSWORD};acore_auth"
+    ports:
+      # BIND_ADDR=100.x.y.z pins this to the Tailscale interface only, so the
+      # server is unreachable from your LAN and from the internet. That is the
+      # whole "closed realm" guarantee, enforced at the socket rather than by
+      # a setting someone can flip.
+      - "${BIND_ADDR:-0.0.0.0}:${AUTH_PORT:-3724}:3724"
+    volumes:
+      - ac-etc:/azerothcore/env/dist/etc
+      - ac-logs:/azerothcore/env/dist/logs
+    depends_on:
+      ac-database:
+        condition: service_healthy
+      ac-realm-config:
+        condition: service_completed_successfully
+
+  # -------------------------------------------------------------- worldserver
+  ac-worldserver:
+    image: ${IMAGE_PREFIX:-azeroth-family}/worldserver:${IMAGE_TAG:-latest}
+    container_name: ac-worldserver
+    restart: unless-stopped
+    # Needed so you can `docker attach ac-worldserver` and use the GM console
+    # to create accounts. Detach again with Ctrl-P Ctrl-Q (NOT Ctrl-C, that
+    # stops the server).
+    stdin_open: true
+    tty: true
+    networks: [ac-network]
+    env_file:
+      # All the family/kid settings live here. Generated from family-settings.ini
+      # by scripts/ini2env.py -- never hand-edit.
+      - ./family.env
+    environment:
+      AC_DATA_DIR: "/azerothcore/env/dist/data"
+      AC_LOGS_DIR: "/azerothcore/env/dist/logs"
+      AC_LOGIN_DATABASE_INFO: "ac-database;3306;root;${DB_ROOT_PASSWORD};acore_auth"
+      AC_WORLD_DATABASE_INFO: "ac-database;3306;root;${DB_ROOT_PASSWORD};acore_world"
+      AC_CHARACTER_DATABASE_INFO: "ac-database;3306;root;${DB_ROOT_PASSWORD};acore_characters"
+      AC_PLAYERBOTS_DATABASE_INFO: "ac-database;3306;root;${DB_ROOT_PASSWORD};acore_playerbots"
+    ports:
+      - "${BIND_ADDR:-0.0.0.0}:${WORLD_PORT:-8085}:8085"
+    volumes:
+      - ac-etc:/azerothcore/env/dist/etc
+      - ac-logs:/azerothcore/env/dist/logs
+      - ac-client-data:/azerothcore/env/dist/data:ro
+    depends_on:
+      ac-database:
+        condition: service_healthy
+      ac-realm-config:
+        condition: service_completed_successfully
+      ac-client-data-init:
+        condition: service_completed_successfully
+
+volumes:
+  ac-database:
+  ac-client-data:
+  ac-etc:
+  ac-logs:
+
+networks:
+  ac-network:

@@ -1,0 +1,21 @@
+# Cloned AzerothCore fork + modules. Tens of GB, and it is not ours to vendor.
+# build-and-push.sh re-clones it on demand.
+/src/
+
+# Database dumps from scripts/admin.sh backup
+/backups/
+*.sql
+*.sql.gz
+
+# The filled-in environment. Contains DB_ROOT_PASSWORD and your Tailscale IP.
+# Only .env.example belongs in git.
+.env
+.env.local
+*.env
+!.env.example
+!family.env
+
+# Docker/editor noise
+.DS_Store
+*.swp
+__pycache__/
