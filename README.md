@@ -75,6 +75,7 @@ azeroth-family/
 ├── .env.example           what to paste into Dokploy's Environment tab
 ├── family-settings.ini    ← the file you actually edit
 ├── family.env             generated from it; never hand-edit
+├── dokploy-template/      one-click Dokploy template (private/custom source)
 └── scripts/
     ├── ini2env.py         converts .ini keys → AC_* env vars (and self-tests)
     └── admin.sh           accounts, console, backups, status
@@ -177,6 +178,51 @@ not by a setting a curious kid could flip.
    `docker-compose.yml`.
 3. Environment tab: paste `.env.example`, filled in.
 4. Deploy.
+
+### ...or install it as a one-click template
+
+This repo also ships a Dokploy **template** under `dokploy-template/`, so you can
+install the whole stack from Dokploy's Templates UI without pasting env vars by
+hand. It's a **private/custom** template, not a marketplace contribution: this
+stack publishes raw game TCP ports (auth 3724 / world 8085) and uses locally
+built images, neither of which the public template format allows.
+
+```
+dokploy-template/
+├── meta.json               registry Dokploy reads
+└── azeroth-family/
+    ├── docker-compose.yml  same stack as the repo root
+    ├── template.toml       variables + env (no web domain — it's TCP, not HTTP)
+    ├── family.env          the kid-friendly settings, baked in
+    └── azeroth-family.png  logo
+```
+
+To use it:
+
+1. Make the `dokploy-template/` path reachable by Dokploy's template fetch.
+   Dokploy pulls templates over an **unauthenticated** HTTP GET, so the path must
+   be publicly readable. This repo is private, so either copy the folder into a
+   small **public** repo (or a GitHub gist) and point Dokploy there, or make this
+   repo public.
+2. In Dokploy → **Settings → Templates**, add a custom template source whose base
+   URL is the raw path to that folder, e.g.
+   `https://raw.githubusercontent.com/<you>/<public-repo>/main/dokploy-template`.
+3. "Azeroth Family Server" appears under Templates. Install it, set
+   `realm_address` to your Tailscale IP (`tailscale ip -4`), and deploy.
+
+First-class support for *private* template sources is tracked at
+[Dokploy #2414](https://github.com/Dokploy/dokploy/issues/2414); once your
+Dokploy version supports an authenticated source you can skip step 1 and point
+it straight at this private repo. The same images must already exist on the host
+(build first with `./build-and-push.sh`).
+
+When you change `family-settings.ini`, regenerate and refresh the baked-in copy
+so the template stays in sync:
+
+```bash
+python3 scripts/ini2env.py family-settings.ini > family.env
+cp family.env dokploy-template/azeroth-family/family.env
+```
 
 First deploy takes ~20 minutes: `ac-client-data-init` downloads ~16 GB of map
 data and `ac-db-import` builds the databases. Both are one-shot containers —

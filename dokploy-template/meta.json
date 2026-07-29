@@ -1,0 +1,13 @@
+[
+  {
+    "id": "azeroth-family",
+    "name": "Azeroth Family Server",
+    "version": "latest",
+    "description": "Closed AzerothCore 3.3.5a realm with mod-playerbots: kid-friendly PvE, 3x XP, 40 AI bots, Tailscale-only access.",
+    "logo": "azeroth-family.png",
+    "links": {
+      "github": "https://github.com/oskar-flores/azeroth-family"
+    },
+    "tags": ["games", "wow", "azerothcore", "playerbots", "entertainment"]
+  }
+]
