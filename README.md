@@ -398,4 +398,7 @@ happily fold its advice in.
 [worldserver.conf.dist](https://github.com/mod-playerbots/azerothcore-wotlk/blob/Playerbot/src/server/apps/worldserver/worldserver.conf.dist) ·
 [AzerothCore install with Docker](https://www.azerothcore.org/wiki/install-with-docker) ·
 [Dokploy Compose docs](https://docs.dokploy.com/docs/core/docker-compose/domains) ·
+[Dokploy template format](https://github.com/Dokploy/templates/blob/canary/_autodocs/template-format.md) ·
+[Dokploy custom/private templates #2414](https://github.com/Dokploy/dokploy/issues/2414) ·
+[Non-HTTP services: ports vs expose #640](https://github.com/Dokploy/templates/issues/640) ·
 [hxhieu image tags](https://hub.docker.com/r/hxhieu/ac-wotlk-worldserver/tags)
