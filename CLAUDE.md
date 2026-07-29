@@ -136,7 +136,7 @@ python3 scripts/ini2env.py family-settings.ini | diff - family.env
 # build (build machine; ~40-90 min cold, needs ~8 GB free RAM)
 ./build-and-push.sh                                # local images: azeroth-family/*
 ./build-and-push.sh --update                       # pull core + modules first
-REGISTRY=ghcr.io/oskarflores ./build-and-push.sh --push
+REGISTRY=ghcr.io/oskar-flores ./build-and-push.sh --push
 
 # read what the bots actually said (no content filter exists; this is the
 # only visibility). Requires ANTHROPIC_API_KEY set in Dokploy.

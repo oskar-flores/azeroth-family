@@ -128,10 +128,10 @@ If Dokploy runs on this same machine, that's it — the images are in the local
 Docker daemon and the stack will find them. If you built somewhere else:
 
 ```bash
-REGISTRY=ghcr.io/oskarflores ./build-and-push.sh --push
+REGISTRY=ghcr.io/oskar-flores ./build-and-push.sh --push
 ```
 
-and set `IMAGE_PREFIX=ghcr.io/oskarflores` in Dokploy.
+and set `IMAGE_PREFIX=ghcr.io/oskar-flores` in Dokploy.
 
 The script clones the correct fork (and refuses to continue if the remote isn't
 the playerbots one), clones the module into `modules/`, and — this is the part

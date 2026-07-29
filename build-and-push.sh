@@ -6,8 +6,8 @@
 # once here and hand finished images to Dokploy. Dokploy never compiles anything.
 #
 #   ./build-and-push.sh              build locally, tag as azeroth-family/*
-#   ./build-and-push.sh --push       also push to $REGISTRY
-#   ./build-and-push.sh --update     git pull core + module first, then build
+#   ./build-and-push.sh --push       also push to $REGISTRY (needs docker login)
+#   ./build-and-push.sh --update     git pull core + modules first, then build
 #
 # First build: 40-90 min and it wants ~8 GB RAM free. Later builds reuse ccache
 # and are much faster.
@@ -18,7 +18,7 @@ set -euo pipefail
 
 # Where to push. Leave empty if Dokploy runs on THIS machine -- then the images
 # are already in the local Docker daemon and no registry is involved at all.
-#   e.g. REGISTRY=ghcr.io/oskarflores
+#   e.g. REGISTRY=ghcr.io/oskar-flores
 REGISTRY="${REGISTRY:-}"
 
 TAG="${TAG:-latest}"
@@ -73,6 +73,22 @@ docker buildx version >/dev/null 2>&1 \
 if [[ -r /proc/meminfo ]]; then
   mem_gb=$(awk '/MemTotal/ {printf "%.0f", $2/1024/1024}' /proc/meminfo)
   (( mem_gb >= 8 )) || warn "only ${mem_gb} GB RAM detected; the C++ build may OOM. Consider lowering parallelism."
+fi
+
+# Everything about --push is checked HERE, before the 40-90 minute compile.
+# These used to live inside build_target, which meant a missing REGISTRY was
+# reported after the longest build in the script had already finished.
+if (( DO_PUSH )); then
+  [[ -n "$REGISTRY" ]] \
+    || die "--push needs REGISTRY, e.g. REGISTRY=ghcr.io/oskar-flores ./build-and-push.sh --push"
+
+  # Not being logged in wastes exactly as much time. Only a warning: credential
+  # helpers keep auths out of config.json, so absence here is not proof.
+  registry_host="${REGISTRY%%/*}"
+  if [[ -r "$HOME/.docker/config.json" ]] \
+     && ! grep -q "\"$registry_host\"" "$HOME/.docker/config.json"; then
+    warn "no stored credentials for $registry_host -- if the push fails, run: docker login $registry_host"
+  fi
 fi
 
 # ---------------------------------------------------------------- fetch sources
@@ -155,8 +171,8 @@ build_target() {
     --build-arg TZ="${TZ:-Europe/Madrid}" \
     "$CORE_DIR"
 
+  # REGISTRY is already validated in preflight, so this is just the push.
   if (( DO_PUSH )); then
-    [[ -n "$REGISTRY" ]] || die "--push needs REGISTRY to be set"
     log "Pushing $image"
     docker push "$image"
   fi
@@ -190,7 +206,6 @@ build_bridge() {
     "$mod_dir"
 
   if (( DO_PUSH )); then
-    [[ -n "$REGISTRY" ]] || die "--push needs REGISTRY to be set"
     log "Pushing $image"
     docker push "$image"
   fi
