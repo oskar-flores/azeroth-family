@@ -147,6 +147,22 @@ for base in "$CORE_DIR/modules"/*/; do
   echo "    $mod: $n SQL file(s) (applied by dbimport from modules/)"
 done
 
+# Deleting the staging block was not enough to stop it recurring. The core's
+# .gitignore has `/data/sql/custom/*`, so files a pre-2dc2bb6 run copied there
+# are *ignored*, not merely untracked: `git reset --hard` leaves them and so does
+# a plain `git clean -fd`. They survive every --update, get COPYed into every
+# image, and the import keeps aborting long after this script stopped creating
+# them. `ls-files --others` (deliberately without --exclude-standard) is what
+# sees them; the tracked README.md and .dummy files stay hidden.
+stale_custom=$(git -C "$CORE_DIR" ls-files --others -- data/sql/custom)
+if [[ -n "$stale_custom" ]]; then
+  printf '%s\n' "$stale_custom" >&2
+  die "staged module SQL in data/sql/custom/ (listed above). dbimport would see each
+    of those filenames twice -- once there, once under modules/ -- and abort the
+    import. Remove them, then rebuild:
+      git -C \"$CORE_DIR\" clean -fdx data/sql/custom"
+fi
+
 # This is the schema for acore_playerbots specifically. Missing it is the real
 # cause of 'Unknown database acore_playerbots' on first boot.
 [[ -d "$CORE_DIR/modules/mod-playerbots/data/sql/playerbots/base" ]] \
