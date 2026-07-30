@@ -9,8 +9,8 @@ Deployment and configuration for a private AzerothCore 3.3.5a (WotLK) realm with
 Tailscale. Read `README.md` for the reasoning behind most settings — but see the
 staleness note under "Invariants" before trusting its build section.
 
-No game code lives here. Thirteen tracked files: three shell scripts, a compose
-file, a Dockerfile, a Python generator, and the config they act on. The C++ core
+No game code lives here. Seventeen tracked files: two shell scripts, a compose
+file, a Dockerfile, two Python scripts, and the config they act on. The C++ core
 is cloned on demand into `src/`, which is **gitignored and disposable**.
 
 ## Architecture
@@ -153,11 +153,18 @@ docker exec ac-llm-chatter-bridge tail -f /logs/llm_requests.jsonl
 The test suite is `ini2env.py --selftest` plus the drift check above; run both
 after any config change. Shell changes are verified by running the script.
 
-`push-to-github.sh` is a one-shot bootstrap: it `git add -A`s and commits
-everything with a fixed message. Don't use it for normal commits.
-
 ## Invariants worth knowing before editing
 
+- **The root files are at the root on purpose — don't "tidy" them into a
+  `config/` subdir.** `docker-compose.yml` resolves its `./family.env` env_file
+  and its `./llm-chatter-settings.conf` mounts relative to its own location, so
+  those three — plus `.env.example` and `family-settings.ini` — must sit next to
+  it; Dokploy also points a "compose path" at the root `docker-compose.yml`, and
+  `scripts/make-template-compose.py` reads all of them from the repo root. And
+  `build-and-push.sh` derives `src/` and `docker/` from its own `SCRIPT_DIR`, so
+  those three are a rigid triple — moving the script silently re-clones the
+  whole core. A `config/` directory looks cleaner and breaks all three
+  consumers.
 - **Do not stage module SQL into `data/sql/custom/`.** This is the one thing the
   README still describes the old way — it was removed in `2dc2bb6` because it
   breaks the import. `dbimport` already applies module SQL from
