@@ -170,6 +170,40 @@ fi
 
 # ------------------------------------------------------------------- build images
 
+# `docker push` exiting 0 is not proof the registry now serves what was just
+# built, and the build machine gives you no hint either way: `docker images`
+# lists the registry-qualified tag whether or not --push was passed, because
+# REGISTRY controls the *tag*, not the push. That is how a fixed db-import image
+# sat on the builder while Dokploy kept pulling the broken one, costing a full
+# redeploy cycle to notice. Compare the digests instead of trusting the exit code.
+#
+# --insecure is needed for a plain-HTTP LAN registry and is harmless against a
+# TLS one (checked against docker.io). Reads the top-level Descriptor, which is
+# correct for the single-arch images this script builds; for a manifest *list*
+# it would report the first platform instead of the index.
+verify_push() {
+  local image="$1"
+  local local_digest remote_digest
+
+  local_digest=$(docker image inspect "$image" \
+      --format '{{range .RepoDigests}}{{println .}}{{end}}' \
+    | awk -F@ -v repo="${image%:*}" '$1 == repo { print $2; exit }')
+
+  remote_digest=$(docker manifest inspect --insecure --verbose "$image" 2>/dev/null \
+    | awk '/"Descriptor"/ { seen = 1 } seen && /"digest"/ { gsub(/[",]/, ""); print $2; exit }')
+
+  [[ -n "$remote_digest" ]] \
+    || die "pushed $image but the registry serves no manifest for that tag"
+
+  [[ "$local_digest" == "$remote_digest" ]] \
+    || die "$image was pushed but the registry still serves a different image.
+      local:    ${local_digest:-<none>}
+      registry: $remote_digest
+    Re-run the push, or look for a caching proxy in front of the registry."
+
+  echo "    verified in registry: $remote_digest"
+}
+
 build_target() {
   local target="$1" name="$2"
   local image="azeroth-family/$name:$TAG"
@@ -191,6 +225,7 @@ build_target() {
   if (( DO_PUSH )); then
     log "Pushing $image"
     docker push "$image"
+    verify_push "$image"
   fi
   echo "$image"
 }
@@ -224,6 +259,7 @@ build_bridge() {
   if (( DO_PUSH )); then
     log "Pushing $image"
     docker push "$image"
+    verify_push "$image"
   fi
 }
 
