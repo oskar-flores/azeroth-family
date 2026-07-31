@@ -45,6 +45,36 @@ services:
     volumes:
       - ac-client-data:/azerothcore/env/dist/data
 
+  # --------------------------------------------- module SQL (runs each boot)
+  # mod-playerbots owns its own database, and the *worldserver* is the only
+  # process that can build it: dbimport registers Login/Character/World and
+  # nothing else (src/tools/dbimport/Main.cpp:116-118), while acore_playerbots
+  # is added by the module's own DatabaseScript, which is compiled into the
+  # worldserver binary. The AC_PLAYERBOTS_DATABASE_INFO handed to ac-db-import
+  # below is therefore inert -- keep it, but do not expect it to import anything.
+  #
+  # The catch is that the core's Dockerfile COPYs modules/ into the db-import
+  # stage only (apps/docker/Dockerfile:208); the worldserver stage takes just
+  # the binary (:174-191). So the worldserver ships an *empty*
+  # /azerothcore/modules and first boot dies with
+  #   Directory ".../mod-playerbots/data/sql/playerbots/base/" not exist
+  # followed by "Could not populate the Playerbots database" and SIGSEGV.
+  #
+  # Stage the tree out of the db-import image, which does have it. This runs on
+  # every boot and overwrites rather than relying on Docker's populate-an-empty-
+  # volume behaviour, which would silently keep serving last month's module SQL
+  # after a core update.
+  ac-module-sql-init:
+    image: ${IMAGE_PREFIX:-azeroth-family}/db-import:${IMAGE_TAG:-latest}
+    container_name: ac-module-sql-init
+    networks: [ac-network]
+    # cp -a as root preserves the acore:acore ownership the worldserver reads as.
+    user: root
+    entrypoint: ["/bin/sh", "-c"]
+    command: ["cp -a /azerothcore/modules/. /staged/ && echo 'staged module SQL:' && ls /staged"]
+    volumes:
+      - ac-modules:/staged
+
   # -------------------------------------------------- db import (runs once)
   ac-db-import:
     image: ${IMAGE_PREFIX:-azeroth-family}/db-import:${IMAGE_TAG:-latest}
@@ -213,6 +243,9 @@ services:
       - ac-etc:/azerothcore/env/dist/etc
       - ac-logs:/azerothcore/env/dist/logs
       - ac-client-data:/azerothcore/env/dist/data:ro
+      # Staged by ac-module-sql-init. Without this the worldserver cannot create
+      # acore_playerbots -- see the comment on that service.
+      - ac-modules:/azerothcore/modules:ro
       # The C++ half of mod-llm-chatter reads ~100 keys from here. Anything not
       # listed in the file falls back to the compiled-in default, which is why
       # we can ship deltas only. No API key is in this file.
@@ -223,6 +256,8 @@ services:
       ac-realm-config:
         condition: service_completed_successfully
       ac-client-data-init:
+        condition: service_completed_successfully
+      ac-module-sql-init:
         condition: service_completed_successfully
 
   # ------------------------------------------------------- llm chatter bridge
@@ -262,6 +297,7 @@ volumes:
   ac-client-data:
   ac-etc:
   ac-logs:
+  ac-modules:
 
 networks:
   ac-network:
