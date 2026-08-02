@@ -186,6 +186,38 @@ case-insensitive ASCII in 3.3.5a; keep them short and typeable.
 
 ---
 
+## Web console
+
+`ac-admin-ui` is a small web page the family can use instead of SSH. It is on
+the tailnet only — published on `BIND_ADDR` just like the game ports, so it is
+reachable at `http://<your tailscale ip>:8080` and nowhere else.
+
+Login is **the player's own WoW account** — the console authenticates against
+`acore_auth` with the same SRP6 the game client uses, not a separate password.
+Anyone at GM level 3 sees the admin page (create accounts, set GM levels up to
+2, restart the worldserver, and run a backup now); everyone else gets a
+read-only family page showing who is online and their own characters.
+
+It needs a dedicated gmlevel-3 service account for its SOAP actions — see
+`SOAP_USER`/`SOAP_PASS` in `.env.example`. Create that once on the Docker host
+before the first deploy:
+
+```bash
+./scripts/admin.sh account acconsole <a long random password>
+./scripts/admin.sh gm acconsole 3
+```
+
+**Restore is deliberately not in the console.** A restore has to run while the
+worldserver is down (it flushes in-memory character state over a fresh import),
+and `restart: unless-stopped` would bring the world straight back up underneath
+the import. Restores stay in `admin.sh`:
+
+```bash
+./scripts/admin.sh restore <file.sql.gz> <db>
+```
+
+---
+
 ## What "kid friendly" means
 
 - **No death penalty.** No resurrection sickness, instant corpse reclaim, zero
