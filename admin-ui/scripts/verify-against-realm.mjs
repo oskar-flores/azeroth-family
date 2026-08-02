@@ -1,7 +1,7 @@
 // Confirms the Node SRP6 implementation reproduces a verifier that a real
 // AzerothCore realm generated. Not part of `npm test` — it needs a live realm.
 //
-//   node test/verify-against-realm.mjs <username> <password> <saltHex> <verifierHex>
+//   node scripts/verify-against-realm.mjs <username> <password> <saltHex> <verifierHex>
 //
 // Get the two hex values with:
 //   docker exec -i ac-database sh -c \
@@ -11,7 +11,7 @@ import { calculateVerifier } from '../src/srp6.js';
 
 const [username, password, saltHex, verifierHex] = process.argv.slice(2);
 if (!username || !password || !saltHex || !verifierHex) {
-  console.error('usage: node test/verify-against-realm.mjs <username> <password> <saltHex> <verifierHex>');
+  console.error('usage: node scripts/verify-against-realm.mjs <username> <password> <saltHex> <verifierHex>');
   process.exit(2);
 }
 
