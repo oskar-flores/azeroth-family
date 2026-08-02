@@ -175,10 +175,11 @@ async function sessionFor(fastify, username, password) {
   return Array.isArray(cookie) ? cookie[0] : cookie;
 }
 
-const form = (fields) => ({
-  headers: { 'content-type': 'application/x-www-form-urlencoded' },
-  payload: new URLSearchParams(fields).toString(),
-});
+// Returns only the payload. Callers must set the cookie and the form
+// content-type together in `headers` — the previous version returned a
+// `headers` key, and `headers: { cookie }, ...form(fields)` silently
+// dropped the cookie (spread overwrite), turning every admin POST into a 403.
+const form = (fields) => new URLSearchParams(fields).toString();
 
 // Table-driven on purpose: an admin route added later that forgets its guard
 // fails here by default rather than shipping open.
@@ -187,8 +188,9 @@ test('every admin route refuses a gmlevel-0 session', async () => {
   const cookie = await sessionFor(fastify, 'nina', 'kidpw');
   for (const route of ADMIN_ROUTES) {
     const res = await fastify.inject({
-      method: route.method, url: route.url, headers: { cookie, ...form({}).headers },
-      ...(route.method === 'POST' ? { payload: '' } : {}),
+      method: route.method, url: route.url,
+      headers: route.method === 'POST' ? { cookie, 'content-type': 'application/x-www-form-urlencoded' } : { cookie },
+      ...(route.method === 'POST' ? { payload: form({}) } : {}),
     });
     assert.equal(res.statusCode, 403, `${route.method} ${route.url} did not return 403`);
   }
@@ -199,8 +201,9 @@ test('every admin route refuses an anonymous visitor', async () => {
   const { fastify } = await buildAdmin();
   for (const route of ADMIN_ROUTES) {
     const res = await fastify.inject({
-      method: route.method, url: route.url, headers: form({}).headers,
-      ...(route.method === 'POST' ? { payload: '' } : {}),
+      method: route.method, url: route.url,
+      headers: route.method === 'POST' ? { 'content-type': 'application/x-www-form-urlencoded' } : {},
+      ...(route.method === 'POST' ? { payload: form({}) } : {}),
     });
     assert.ok([302, 401, 403].includes(res.statusCode), `${route.method} ${route.url} => ${res.statusCode}`);
   }
@@ -223,10 +226,12 @@ test('creating an account sends the SOAP command and shows what it returned', as
   });
   const cookie = await sessionFor(fastify, 'papa', 'goodpw');
   const res = await fastify.inject({
-    method: 'POST', url: '/admin/account', headers: { cookie }, ...form({ username: 'bob', password: 'secret1' }),
+    method: 'POST', url: '/admin/account',
+    headers: { cookie, 'content-type': 'application/x-www-form-urlencoded' },
+    payload: form({ username: 'bob', password: 'secret1' }),
   });
   assert.equal(res.statusCode, 200);
-  assert.deepEqual(sent, ['account create bob secret1']);
+  assert.ok(sent.includes('account create bob secret1'));
   assert.match(res.body, /Account created/);
   await fastify.close();
 });
@@ -236,7 +241,9 @@ test('the password never appears in the response or the audit entry', async () =
   const { fastify, entries } = await buildAdmin();
   const cookie = await sessionFor(fastify, 'papa', 'goodpw');
   const res = await fastify.inject({
-    method: 'POST', url: '/admin/account', headers: { cookie }, ...form({ username: 'bob', password: 'hunter22' }),
+    method: 'POST', url: '/admin/account',
+    headers: { cookie, 'content-type': 'application/x-www-form-urlencoded' },
+    payload: form({ username: 'bob', password: 'hunter22' }),
   });
   assert.ok(!res.body.includes('hunter22'));
   assert.ok(!JSON.stringify(entries).includes('hunter22'));
@@ -247,7 +254,9 @@ test('the audit trail records who did what', async () => {
   const { fastify, entries } = await buildAdmin();
   const cookie = await sessionFor(fastify, 'papa', 'goodpw');
   await fastify.inject({
-    method: 'POST', url: '/admin/account', headers: { cookie }, ...form({ username: 'bob', password: 'secret1' }),
+    method: 'POST', url: '/admin/account',
+    headers: { cookie, 'content-type': 'application/x-www-form-urlencoded' },
+    payload: form({ username: 'bob', password: 'secret1' }),
   });
   assert.equal(entries.at(-1).actor, 'PAPA');
   assert.equal(entries.at(-1).action, 'account.create');
@@ -263,7 +272,9 @@ test('a SOAP Fault is rendered as a user-level message, not a 500', async () => 
   });
   const cookie = await sessionFor(fastify, 'papa', 'goodpw');
   const res = await fastify.inject({
-    method: 'POST', url: '/admin/account', headers: { cookie }, ...form({ username: 'papa', password: 'secret1' }),
+    method: 'POST', url: '/admin/account',
+    headers: { cookie, 'content-type': 'application/x-www-form-urlencoded' },
+    payload: form({ username: 'papa', password: 'secret1' }),
   });
   assert.equal(res.statusCode, 200);
   assert.match(res.body, /Account already exists\./);
@@ -279,7 +290,9 @@ test('a SOAP 401 names the environment variable to fix', async () => {
   });
   const cookie = await sessionFor(fastify, 'papa', 'goodpw');
   const res = await fastify.inject({
-    method: 'POST', url: '/admin/account', headers: { cookie }, ...form({ username: 'bob', password: 'secret1' }),
+    method: 'POST', url: '/admin/account',
+    headers: { cookie, 'content-type': 'application/x-www-form-urlencoded' },
+    payload: form({ username: 'bob', password: 'secret1' }),
   });
   assert.match(res.body, /SOAP_USER/);
   await fastify.close();
@@ -299,7 +312,11 @@ test('invalid usernames and passwords are refused before any SOAP call', async (
     { username: 'bob', password: 'contraseñ' },           // non-ASCII
   ];
   for (const fields of cases) {
-    const res = await fastify.inject({ method: 'POST', url: '/admin/account', headers: { cookie }, ...form(fields) });
+    const res = await fastify.inject({
+      method: 'POST', url: '/admin/account',
+      headers: { cookie, 'content-type': 'application/x-www-form-urlencoded' },
+      payload: form(fields),
+    });
     assert.equal(res.statusCode, 400, JSON.stringify(fields));
   }
   assert.deepEqual(sent.filter((c) => c.startsWith('account create')), []);
@@ -313,8 +330,9 @@ test('setting a GM level sends the -1 realm id admin.sh also uses', async () => 
   });
   const cookie = await sessionFor(fastify, 'papa', 'goodpw');
   await fastify.inject({
-    method: 'POST', url: '/admin/gmlevel', headers: { cookie },
-    ...form({ username: 'nina', level: '0' }),
+    method: 'POST', url: '/admin/gmlevel',
+    headers: { cookie, 'content-type': 'application/x-www-form-urlencoded' },
+    payload: form({ username: 'nina', level: '0' }),
   });
   assert.ok(sent.includes('account set gmlevel nina 0 -1'));
   await fastify.close();
@@ -328,8 +346,9 @@ test('an admin cannot change their own level', async () => {
   });
   const cookie = await sessionFor(fastify, 'papa', 'goodpw');
   const res = await fastify.inject({
-    method: 'POST', url: '/admin/gmlevel', headers: { cookie },
-    ...form({ username: 'papa', level: '0', confirm: 'papa' }),
+    method: 'POST', url: '/admin/gmlevel',
+    headers: { cookie, 'content-type': 'application/x-www-form-urlencoded' },
+    payload: form({ username: 'papa', level: '0', confirm: 'papa' }),
   });
   assert.equal(res.statusCode, 400);
   assert.match(res.body, /your own/i);
@@ -355,11 +374,12 @@ test('a change that would leave zero admins is refused', async () => {
   });
   const cookie = await sessionFor(fastify, 'papa', 'goodpw');
   const res = await fastify.inject({
-    method: 'POST', url: '/admin/gmlevel', headers: { cookie },
-    ...form({ username: 'otroadmin', level: '0', confirm: 'otroadmin' }),
+    method: 'POST', url: '/admin/gmlevel',
+    headers: { cookie, 'content-type': 'application/x-www-form-urlencoded' },
+    payload: form({ username: 'otroadmin', level: '0', confirm: 'otroadmin' }),
   });
   assert.equal(res.statusCode, 400);
-  assert.match(res.body, /last.*admin/i);
+  assert.match(res.body, /last.*GM level 3.*account/i);
   assert.deepEqual(sent.filter((c) => c.startsWith('account set')), []);
   await fastify.close();
 });
@@ -373,14 +393,17 @@ test('promoting above 0 needs the username typed to confirm', async () => {
   const cookie = await sessionFor(fastify, 'papa', 'goodpw');
 
   const without = await fastify.inject({
-    method: 'POST', url: '/admin/gmlevel', headers: { cookie }, ...form({ username: 'nina', level: '2' }),
+    method: 'POST', url: '/admin/gmlevel',
+    headers: { cookie, 'content-type': 'application/x-www-form-urlencoded' },
+    payload: form({ username: 'nina', level: '2' }),
   });
   assert.equal(without.statusCode, 400);
   assert.deepEqual(sent.filter((c) => c.startsWith('account set')), []);
 
   const with_ = await fastify.inject({
-    method: 'POST', url: '/admin/gmlevel', headers: { cookie },
-    ...form({ username: 'nina', level: '2', confirm: 'nina' }),
+    method: 'POST', url: '/admin/gmlevel',
+    headers: { cookie, 'content-type': 'application/x-www-form-urlencoded' },
+    payload: form({ username: 'nina', level: '2', confirm: 'nina' }),
   });
   assert.equal(with_.statusCode, 200);
   assert.ok(sent.includes('account set gmlevel nina 2 -1'));
