@@ -194,8 +194,8 @@ reachable at `http://<your tailscale ip>:8080` and nowhere else.
 
 Login is **the player's own WoW account** — the console authenticates against
 `acore_auth` with the same SRP6 the game client uses, not a separate password.
-Anyone at GM level 3 sees the admin page (create accounts, set GM levels up to
-2, restart the worldserver, and run a backup now); everyone else gets a
+Anyone at GM level 3 sees the admin page (create accounts, set GM levels 0-3,
+restart the worldserver, and run a backup now); everyone else gets a
 read-only family page showing who is online and their own characters.
 
 It needs a dedicated gmlevel-3 service account for its SOAP actions — see

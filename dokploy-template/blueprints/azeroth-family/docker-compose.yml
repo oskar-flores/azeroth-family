@@ -237,6 +237,9 @@ services:
       AC_AI_PLAYERBOT_RANDOM_BOT_SUGGEST_DUNGEONS: "0"
       AC_AI_PLAYERBOT_ENABLE_GREET: "0"
       AC_AI_PLAYERBOT_RANDOM_BOT_SAY_WITHOUT_MASTER: "0"
+      AC_SOAP_ENABLED: "1"
+      AC_SOAP_IP: "0.0.0.0"
+      AC_SOAP_PORT: "7878"
     ports:
       - "${BIND_ADDR:-0.0.0.0}:${WORLD_PORT:-8085}:8085"
     volumes:
@@ -292,12 +295,45 @@ services:
       ac-db-import:
         condition: service_completed_successfully
 
+  # ------------------------------------------------------------------ admin ui
+  # The web console: accounts, GM levels, graceful restart, backups, and a
+  # read-only page the family can use to see who is online.
+  #
+  # It has NO Docker socket, deliberately. Everything it does goes through MySQL
+  # or through SOAP on ac-worldserver:7878, which is reachable on ac-network and
+  # published nowhere. docker.sock in a web-facing container is host root; the
+  # one feature that would justify any Docker access (a container health grid)
+  # is not in v1.
+  #
+  # Published on BIND_ADDR, so this page is tailnet-only by exactly the same
+  # mechanism that already contains 3724 and 8085.
+  ac-admin-ui:
+    image: ${IMAGE_PREFIX:-azeroth-family}/admin-ui:${IMAGE_TAG:-latest}
+    container_name: ac-admin-ui
+    restart: unless-stopped
+    networks: [ac-network]
+    environment:
+      DB_ROOT_PASSWORD: ${DB_ROOT_PASSWORD}
+      # A dedicated gmlevel-3 service account, created once with
+      # ./scripts/admin.sh. NOT a family member's login -- passing a user's
+      # password through would mean holding it in the session.
+      SOAP_USER: ${SOAP_USER:?set SOAP_USER in Dokploy}
+      SOAP_PASS: ${SOAP_PASS:?set SOAP_PASS in Dokploy}
+    ports:
+      - "${BIND_ADDR:-0.0.0.0}:${UI_PORT:-8080}:8080"
+    volumes:
+      - ac-backups:/backups
+    depends_on:
+      ac-database:
+        condition: service_healthy
+
 volumes:
   ac-database:
   ac-client-data:
   ac-etc:
   ac-logs:
   ac-modules:
+  ac-backups:
 
 networks:
   ac-network:

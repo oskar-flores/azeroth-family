@@ -28,6 +28,15 @@ world_port = "8085"
 # REQUIRED: the Anthropic key the llm-chatter-bridge uses to talk in Spanish.
 # Replace the placeholder at install. No secrets are baked into the template.
 anthropic_api_key = "YOUR_ANTHROPIC_API_KEY"
+ui_port = "8080"
+# REQUIRED: a dedicated GM level 3 service account for ac-admin-ui's SOAP
+# actions -- NOT a family member's login. Create it on the Docker host with
+# THIS password BEFORE the first deploy (Dokploy cannot generate it for you:
+# the account must exist with a matching password before ac-admin-ui starts):
+#   ./scripts/admin.sh account acconsole <the password you put below>
+#   ./scripts/admin.sh gm acconsole 3
+soap_user = "acconsole"
+soap_pass = "CHANGE_ME_TO_A_LONG_RANDOM_PASSWORD"
 
 [config.env]
 DB_ROOT_PASSWORD = "${db_root_password}"
@@ -41,6 +50,9 @@ CLIENT_DATA_TAG = "${client_data_tag}"
 AUTH_PORT = "${auth_port}"
 WORLD_PORT = "${world_port}"
 ANTHROPIC_API_KEY = "${anthropic_api_key}"
+UI_PORT = "${ui_port}"
+SOAP_USER = "${soap_user}"
+SOAP_PASS = "${soap_pass}"
 
 # >>> managed: llm-chatter-settings.conf mount (scripts/make-template-compose.py) >>>
 # llm-chatter-settings.conf, shipped as a Dokploy File Mount. Dokploy
