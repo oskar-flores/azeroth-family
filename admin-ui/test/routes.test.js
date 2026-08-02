@@ -452,6 +452,22 @@ test('a second backup while one runs is reported, not crashed', async () => {
   await fastify.close();
 });
 
+test('a backup that fails to start is still audited as a failure', async () => {
+  const { fastify, entries } = await buildAdmin({
+    backups: stubBackups({
+      start: () => { throw new Error('a backup is already running'); },
+      status: () => ({ state: 'running', done: [] }),
+    }),
+  });
+  const cookie = await sessionFor(fastify, 'papa', 'goodpw');
+  await fastify.inject({ method: 'POST', url: '/admin/backup', headers: { cookie }, payload: '' });
+  const last = entries.at(-1);
+  assert.equal(last.action, 'backup.start');
+  assert.equal(last.result, 'failed: a backup is already running');
+  assert.equal(last.actor, 'PAPA');
+  await fastify.close();
+});
+
 test('a download path outside the backup directory is refused', async () => {
   const { fastify } = await buildAdmin({
     backups: stubBackups({ resolve() { throw new Error('not a backup filename'); } }),

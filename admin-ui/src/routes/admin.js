@@ -169,6 +169,7 @@ export default async function adminRoutes(fastify, { db, auth, soap, backups, au
       audit({ actor: user.username, action: 'backup.start', target: 'all', result: 'ok' });
       return reply.redirect('/admin');
     } catch (err) {
+      audit({ actor: user.username, action: 'backup.start', target: 'all', result: `failed: ${err.message}` });
       return render(reply, user, [{ kind: 'error', text: err.message }], 409);
     }
   });
