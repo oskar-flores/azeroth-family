@@ -19,6 +19,7 @@
 .DS_Store
 *.swp
 __pycache__/
+node_modules/
 
 # Superpowers subagent-driven-development scratch workspace
 .superpowers/
