@@ -23,6 +23,12 @@ export function createDb({
     dateStrings: false,
   });
 
+  // An idle connection dying emits an 'error' event; without a listener Node
+  // would crash the process. This is infrastructure noise — log and carry on.
+  pool.on('error', (err) => {
+    console.error('[ac-admin-ui db pool]', err.code ?? '', err.message);
+  });
+
   const botFilter = `${botPrefix}%`;
 
   return {
