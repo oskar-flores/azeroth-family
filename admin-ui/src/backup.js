@@ -13,10 +13,14 @@ const BACKUP_NAME = /^([a-z_]+)_(\d{4}-\d{2}-\d{2}_\d{4})\.sql\.gz$/;
 
 const GIB = 1024 ** 3;
 
+// Local time, not UTC: scripts/admin.sh:77 stamps with `date +%Y-%m-%d_%H%M`,
+// which is the host's local clock. Using UTC here would offset every filename
+// this tool writes against every filename admin.sh writes on any host that is
+// not itself UTC, and correlating the two by name is the point of matching.
 function stampFor(date) {
   const pad = (n) => String(n).padStart(2, '0');
-  return `${date.getUTCFullYear()}-${pad(date.getUTCMonth() + 1)}-${pad(date.getUTCDate())}`
-       + `_${pad(date.getUTCHours())}${pad(date.getUTCMinutes())}`;
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
+       + `_${pad(date.getHours())}${pad(date.getMinutes())}`;
 }
 
 export function createBackupManager({
@@ -62,6 +66,13 @@ export function createBackupManager({
       child.on('error', reject);
       child.on('close', (code) => resolve(code));
     });
+    // If spawn itself fails (missing binary, EACCES), 'error' fires and BOTH this
+    // promise and the pipeline below reject. The pipeline rejects first, so the
+    // `await exited` in the try is never reached and this rejection would go
+    // unhandled — which under Node's default --unhandled-rejections=throw kills
+    // the whole admin-ui process, not just the job. This no-op marks it handled;
+    // `await exited` below still observes the same rejection normally.
+    exited.catch(() => {});
 
     try {
       await pipeline(child.stdout, createGzip(), createWriteStream(partialPath));

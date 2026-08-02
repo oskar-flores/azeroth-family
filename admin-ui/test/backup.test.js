@@ -31,12 +31,24 @@ const settle = async (manager) => {
   throw new Error('backup job never finished');
 };
 
+const RUN_AT = new Date('2026-08-02T14:35:00Z');
+
+// What admin.sh's `date +%Y-%m-%d_%H%M` would print for RUN_AT on this host.
+// Derived from the local accessors rather than hardcoded, so tests that merely
+// need to name the file they just wrote pass in any timezone. The dedicated
+// local-vs-UTC test below pins TZ and hardcodes instead — that one is the proof.
+const localStamp = (date) => {
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
+       + `_${pad(date.getHours())}${pad(date.getMinutes())}`;
+};
+
 const managerWith = (mysqldumpPath, overrides = {}) => createBackupManager({
   dir,
   mysqldumpPath,
   mysql: { host: 'db', port: 3306, user: 'root', password: 'secret' },
   databases: ['acore_characters', 'acore_auth'],
-  now: () => new Date('2026-08-02T14:35:00Z'),
+  now: () => RUN_AT,
   ...overrides,
 });
 
@@ -56,10 +68,11 @@ test('a successful run writes one gzipped dump per database, named like admin.sh
   const status = await settle(manager);
 
   assert.equal(status.state, 'done');
+  const stamp = localStamp(RUN_AT);
   const names = (await fs.readdir(dir)).sort();
   assert.deepEqual(names, [
-    'acore_auth_2026-08-02_1435.sql.gz',
-    'acore_characters_2026-08-02_1435.sql.gz',
+    `acore_auth_${stamp}.sql.gz`,
+    `acore_characters_${stamp}.sql.gz`,
   ]);
 });
 
@@ -70,7 +83,7 @@ test('the dump is really gzip and really contains the dump output', async () => 
 
   const chunks = [];
   await pipeline(
-    createReadStream(path.join(dir, 'acore_auth_2026-08-02_1435.sql.gz')),
+    createReadStream(path.join(dir, `acore_auth_${localStamp(RUN_AT)}.sql.gz`)),
     createGunzip(),
     async function* (source) { for await (const c of source) chunks.push(c); },
   );
@@ -86,6 +99,74 @@ test('a mysqldump that dies mid-dump leaves no .sql.gz, only a failed status', a
   assert.equal(status.state, 'failed');
   assert.match(status.error, /acore_characters/);
   assert.deepEqual((await fs.readdir(dir)).filter((f) => f.endsWith('.sql.gz')), []);
+});
+
+// Regression: a mysqldump that cannot be spawned at all (missing from the image,
+// misconfigured path, EACCES) used to kill the entire admin-ui process. The
+// child's 'error' event rejected both the pipeline and the separate `exited`
+// promise; the pipeline rejected first, so `await exited` was never reached and
+// that second rejection went unhandled — fatal under Node's default
+// --unhandled-rejections=throw. One bad path took down the whole console.
+test('a mysqldump that cannot be spawned fails the job, not the process', async () => {
+  const unhandled = [];
+  const record = (reason) => unhandled.push(reason);
+  // Recording rather than relying on node:test's own detection: a listener
+  // suppresses the default throw, so the assertion below stands in for it.
+  process.on('unhandledRejection', record);
+  try {
+    const missing = path.join(binDir, 'definitely', 'not', 'here', 'mysqldump-xyz');
+    const manager = managerWith(missing);
+    manager.start();
+    const status = await settle(manager);
+
+    assert.equal(status.state, 'failed');
+    assert.match(status.error, /ENOENT|mysqldump-xyz/);
+    // Nothing half-written survives, not even the .partial.
+    assert.deepEqual(await fs.readdir(dir), []);
+    // And the manager is still usable afterwards — the failure was contained.
+    assert.doesNotThrow(() => manager.start());
+    await settle(manager);
+  } finally {
+    process.off('unhandledRejection', record);
+  }
+
+  assert.deepEqual(
+    unhandled.map((e) => (e && e.message) || String(e)),
+    [],
+    'spawn failure left an unhandled rejection, which terminates the admin-ui process',
+  );
+});
+
+// Regression: stampFor() used getUTC*, but scripts/admin.sh:77 stamps with
+// `date +%Y-%m-%d_%H%M` — the host's local clock. On any non-UTC host the two
+// tools named the same moment differently, defeating the cross-tool correlation
+// the matching filename format exists for.
+test('the stamp follows the local clock like admin.sh, not UTC', async () => {
+  const originalTz = process.env.TZ;
+  // Asia/Tokyo is UTC+9 year-round (no DST), so this instant lands on a
+  // different hour AND a different calendar day than its UTC rendering — a UTC
+  // stamp cannot coincidentally match.
+  process.env.TZ = 'Asia/Tokyo';
+  try {
+    const when = new Date('2026-08-02T18:00:00Z');
+    assert.equal(when.getUTCHours(), 18, 'sanity: 18:00 UTC on the 2nd');
+    assert.equal(when.getUTCDate(), 2);
+    assert.equal(when.getHours(), 3, 'sanity: 03:00 JST on the 3rd');
+    assert.equal(when.getDate(), 3);
+
+    const manager = managerWith(await fakeMysqldump('ok'), {
+      databases: ['acore_auth'],
+      now: () => when,
+    });
+    manager.start();
+    assert.equal((await settle(manager)).state, 'done');
+
+    // Local (JST) would be 2026-08-03_0300; UTC would be 2026-08-02_1800.
+    assert.deepEqual(await fs.readdir(dir), ['acore_auth_2026-08-03_0300.sql.gz']);
+  } finally {
+    if (originalTz === undefined) delete process.env.TZ;
+    else process.env.TZ = originalTz;
+  }
 });
 
 test('the password is never passed on the command line', async () => {
