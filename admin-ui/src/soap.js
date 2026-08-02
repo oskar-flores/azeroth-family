@@ -39,6 +39,17 @@ const envelope = (command) => `<?xml version="1.0" encoding="utf-8"?>
 
 function post({ host, port, auth, body, timeoutMs }) {
   return new Promise((resolve, reject) => {
+    // Guards against double-settling the promise. In particular, if the peer
+    // (the worldserver) sends headers, writes part of the body, then the
+    // socket is destroyed -- e.g. because the process itself died mid-reply,
+    // exactly what a `server restart` command triggers -- Node emits that as
+    // a 'close' (or 'aborted'/'error') event on the RESPONSE object, not on
+    // `req`, and only if something is listening. req.setTimeout's idle timer
+    // does not cover this: it is tied to the live socket, which the peer has
+    // by then already destroyed. Without a listener here, executeCommand()
+    // would hang forever instead of surfacing a SoapError.
+    let settled = false;
+
     const req = http.request({
       host,
       port,
@@ -53,13 +64,26 @@ function post({ host, port, auth, body, timeoutMs }) {
     }, (res) => {
       const chunks = [];
       res.on('data', (chunk) => chunks.push(chunk));
-      res.on('end', () => resolve({ status: res.statusCode, body: Buffer.concat(chunks).toString('utf8') }));
+      res.on('end', () => {
+        settled = true;
+        resolve({ status: res.statusCode, body: Buffer.concat(chunks).toString('utf8') });
+      });
+      const onInterrupted = () => {
+        if (settled) return;
+        settled = true;
+        reject(new SoapError('unreachable', 'connection to the worldserver was lost mid-response'));
+      };
+      res.on('close', onInterrupted);
+      res.on('aborted', onInterrupted);
+      res.on('error', onInterrupted);
     });
 
     req.setTimeout(timeoutMs, () => {
       req.destroy(new SoapError('timeout', `worldserver did not answer within ${timeoutMs}ms`));
     });
     req.on('error', (err) => {
+      if (settled) return;
+      settled = true;
       reject(err instanceof SoapError
         ? err
         : new SoapError('unreachable', 'cannot reach the worldserver', { detail: err.code ?? err.message }));

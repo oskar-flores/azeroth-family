@@ -127,3 +127,28 @@ test('an empty command is refused before a request is made', async () => {
   const soap = createSoapClient({ host: '127.0.0.1', port: 1, user: 'u', pass: 'p' });
   await assert.rejects(() => soap.executeCommand('  '), (err) => err.kind === 'protocol');
 });
+
+// The worldserver process itself can die mid-reply -- exactly what sending
+// `server restart` through this client triggers. Node delivers that as an
+// event on the RESPONSE object (not `req`), but only once the client has
+// actually received headers/part of the body -- destroying the socket
+// before that point is a *different* failure (a connection-reset that Node
+// raises as 'error' on `req`, not this bug). The write callback plus a short
+// delay ensure the client has parsed headers and started receiving the body
+// before the peer disappears, so this genuinely exercises the res-side gap.
+// A `timeout` option bounds the test itself so a regression here fails fast
+// rather than hanging the whole suite.
+test('a connection dropped mid-response becomes an unreachable error, not a hang', { timeout: 3000 }, async () => {
+  await withServer((req, res) => {
+    res.writeHead(200, { 'content-type': 'text/xml' });
+    res.write('<?xml version="1.0" encoding="UTF-8"?><SOAP-ENV:Envelope><SOAP-ENV:Body><ns1:executeCommandResponse><result>partial', () => {
+      setTimeout(() => res.socket.destroy(), 20);
+    });
+  }, async (soap) => {
+    await assert.rejects(() => soap.executeCommand('server restart'), (err) => {
+      assert.ok(err instanceof SoapError);
+      assert.equal(err.kind, 'unreachable');
+      return true;
+    });
+  });
+});
