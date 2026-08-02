@@ -263,7 +263,34 @@ build_bridge() {
   fi
 }
 
+# ------------------------------------------------------------- admin ui
+
+# The web console. Like the bridge this is an npm ci, seconds not hours, and it
+# has nothing to do with the core's Dockerfile.
+build_admin_ui() {
+  local app_dir="$SCRIPT_DIR/admin-ui"
+  local dockerfile="$SCRIPT_DIR/docker/admin-ui.Dockerfile"
+  local image="azeroth-family/admin-ui:$TAG"
+  [[ -n "$REGISTRY" ]] && image="$REGISTRY/admin-ui:$TAG"
+
+  [[ -d "$app_dir" ]] || die "missing $app_dir"
+  [[ -f "$dockerfile" ]] || die "missing $dockerfile"
+
+  log "Building $image"
+  DOCKER_BUILDKIT=1 docker build \
+    --file "$dockerfile" \
+    --tag "$image" \
+    "$app_dir"
+
+  if (( DO_PUSH )); then
+    log "Pushing $image"
+    docker push "$image"
+    verify_push "$image"
+  fi
+}
+
 build_bridge
+build_admin_ui
 
 log "Done"
 cat <<EOF
@@ -273,6 +300,7 @@ Images built:
   $( [[ -n "$REGISTRY" ]] && echo "$REGISTRY" || echo "azeroth-family" )/authserver:$TAG
   $( [[ -n "$REGISTRY" ]] && echo "$REGISTRY" || echo "azeroth-family" )/db-import:$TAG
   $( [[ -n "$REGISTRY" ]] && echo "$REGISTRY" || echo "azeroth-family" )/llm-chatter-bridge:$TAG
+  $( [[ -n "$REGISTRY" ]] && echo "$REGISTRY" || echo "azeroth-family" )/admin-ui:$TAG
 
 Next: set IMAGE_PREFIX and IMAGE_TAG in Dokploy's environment to match, then deploy.
 Also set ANTHROPIC_API_KEY -- the bridge refuses to start without it.

@@ -148,6 +148,10 @@ docker exec ac-llm-chatter-bridge tail -f /logs/llm_requests.jsonl
 ./scripts/admin.sh list | console | status
 ./scripts/admin.sh backup [dir]                    # keeps last 14 per database
 ./scripts/admin.sh restore <file.sql.gz> <db>
+
+# web console (tailnet only, http://<tailscale-ip>:${UI_PORT:-8080})
+cd admin-ui && npm test                            # unit tests; db.test.js needs a throwaway MySQL
+docker logs ac-admin-ui 2>&1 | grep audit          # who did what through the console
 ```
 
 The test suite is `ini2env.py --selftest` plus the drift check above; run both
@@ -221,3 +225,19 @@ after any config change. Shell changes are verified by running the script.
 - Bot load is tuned by `AiPlayerbot.MinRandomBots` / `MaxRandomBots` (currently
   150/150) — that's the first dial for a struggling host, before anything else.
   It's runtime-only: regenerate `family.env` and redeploy, no rebuild.
+- **`ac-admin-ui` has no Docker socket, and that is a design decision, not an
+  oversight.** Every capability it has runs over MySQL or SOAP. `docker.sock` in
+  a web-facing container is host root, and socket proxies only help while access
+  stays read-only. The two things it therefore cannot do — start a fully dead
+  container, and restore a database — stay in `scripts/admin.sh`. Restore in
+  particular cannot be made safe here: the worldserver flushes in-memory
+  character state over a fresh import, and `restart: unless-stopped`
+  (`docker-compose.yml:163`) means this app cannot hold the world down.
+- **`SOAP.IP = 0.0.0.0` in `family-settings.ini` is required, not a mistake.**
+  `127.0.0.1` is per-container loopback, which makes SOAP unreachable from
+  `ac-admin-ui`. Port 7878 has no `ports:` entry, so `ac-network` is the whole
+  containment. Changing it back to `127.0.0.1` silently breaks account creation.
+- **`SOAP_USER` is a standing gmlevel-3 credential.** It is the largest piece of
+  authority the console introduces and it exists whether or not anyone is logged
+  in. Because SOAP attributes every command to it, the app's own log is the only
+  record of who actually asked — same reasoning as `LLMChatter.RequestLog`.
