@@ -72,12 +72,32 @@ INSERT INTO acore_characters.characters (guid, account, name, race, class, level
   (13, 3, 'Botrogue',    2,  4, 42, 1, 1750000200);
 `;
 
+// `mysqladmin ping` reports success before MySQL 8.4 can reliably serve the
+// multi-statement DDL below, so a run that starts the instant ping succeeds can
+// lose the connection (PROTOCOL_CONNECTION_LOST) during the handshake or
+// mid-schema -- which fails every db.test.js case via the before() hook and
+// makes `npm test` flaky. Poll until the server is genuinely ready; SCHEMA
+// starts with DROP DATABASE IF EXISTS, so retries are idempotent.
 export async function resetTestDatabase() {
-  const conn = await mysql.createConnection({ ...TEST_MYSQL, multipleStatements: true });
-  try {
-    await conn.query(SCHEMA);
-    await conn.query(SEED);
-  } finally {
-    await conn.end();
+  let lastErr;
+  for (let attempt = 0; attempt < 60; attempt++) {
+    let conn;
+    try {
+      conn = await mysql.createConnection({
+        ...TEST_MYSQL,
+        multipleStatements: true,
+        connectTimeout: 2000,
+      });
+      await conn.query('SELECT 1');
+      await conn.query(SCHEMA);
+      await conn.query(SEED);
+      return;
+    } catch (err) {
+      lastErr = err;
+    } finally {
+      try { await conn?.end(); } catch { /* connection already gone */ }
+    }
+    await new Promise((r) => setTimeout(r, 500));
   }
+  throw lastErr;
 }
