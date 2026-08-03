@@ -37,9 +37,25 @@ button[disabled] { opacity: .45; cursor: not-allowed; }
 .pill.down { color: var(--bad); border-color: var(--bad); }
 pre { overflow-x: auto; padding: .75rem; border: 1px solid var(--line); border-radius: .25rem; }
 .bar { display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; flex-wrap: wrap; }
+nav.tabs { display:flex; flex-wrap:wrap; gap:0; border-bottom:1px solid var(--line); margin:0 0 1rem; }
+nav.tabs a { padding:.5rem .8rem; color:var(--muted); text-decoration:none; font-size:.9rem; border-bottom:2px solid transparent; }
+nav.tabs a.active { color:var(--accent); border-bottom-color:var(--accent); font-weight:600; }
 `;
 
-export function layout({ title, lang = 'es', body, user }) {
+const TAB_DEFS = [
+  ['overview', 'Overview', '/admin'],
+  ['accounts', 'Accounts', '/admin/accounts'],
+  ['characters', 'Characters', '/admin/characters'],
+  ['mailbox', 'Mailbox', '/admin/mailbox'],
+  ['maintenance', 'Maintenance', '/admin/maintenance'],
+  ['backups', 'Backups', '/admin#backups'],
+];
+
+export function layout({ title, lang = 'es', body, user, section }) {
+  const tabs = section
+    ? `<nav class="tabs">${TAB_DEFS.map(([key, label, href]) =>
+        `<a class="tab ${key === section ? 'active' : ''}" href="${href}">${escapeHtml(label)}</a>`).join('')}</nav>`
+    : '';
   return `<!doctype html>
 <html lang="${escapeHtml(lang)}">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
@@ -49,6 +65,7 @@ export function layout({ title, lang = 'es', body, user }) {
   ? `<form action="/logout" method="post"><span class="muted">${escapeHtml(user.username)}</span>
      <button type="submit">${lang === 'es' ? 'Salir' : 'Log out'}</button></form>`
   : ''}</div>
+${tabs}
 ${body}
 </main></body></html>`;
 }

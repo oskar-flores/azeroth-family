@@ -122,3 +122,22 @@ test('the restore page shows the exact admin.sh command and no restore button', 
   assert.match(html, /\.\/scripts\/admin\.sh restore .*acore_characters_2026-08-02_1435\.sql\.gz acore_characters/);
   assert.ok(!/<button[^>]*>\s*Restore/i.test(html));
 });
+
+const TABS = ['Overview', 'Accounts', 'Characters', 'Mailbox', 'Maintenance', 'Backups'];
+
+test('an admin page renders the six section tabs with the active one marked', () => {
+  const html = layout({ title: 'Realm admin', lang: 'en', user: { username: 'PAPA', role: 3 }, section: 'overview', body: '' });
+  for (const t of TABS) assert.match(html, new RegExp(t), `missing tab ${t}`);
+  assert.match(html, /class="tab active"[^]*>Overview</);
+});
+
+test('a family page (no section) renders no tab nav', () => {
+  const html = layout({ title: 'Azeroth Familiar', lang: 'es', body: '' });
+  assert.ok(!/class="tabs"/.test(html));
+});
+
+test('the active tab follows the section argument', () => {
+  const html = layout({ title: 'x', lang: 'en', user: { username: 'PAPA', role: 3 }, section: 'accounts', body: '' });
+  assert.match(html, /class="tab active" href="\/admin\/accounts"/);
+  assert.ok(!/class="tab active"[^]*>Overview</.test(html));
+});
