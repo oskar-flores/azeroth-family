@@ -17,7 +17,7 @@ ${realmLine(realm)}`,
   });
 }
 
-export function familyPage({ user, realm, realmUp, online, characters, worldMessage }) {
+export function familyPage({ user, realm, realmUp, online, characters, worldMessage, poll }) {
   const characterRows = characters.length === 0
     ? `<tr><td colspan="5" class="muted">Todavía no tienes personajes.</td></tr>`
     : characters.map((c) => `<tr>
@@ -35,12 +35,14 @@ export function familyPage({ user, realm, realmUp, online, characters, worldMess
     title: 'Azeroth Familiar',
     lang: 'es',
     user,
+    poll,
     body: `
 <p>El reino está ${realmPill(realmUp, 'es')}.</p>
 ${realmLine(realm)}
 ${worldMessage ? `<div class="notice">${escapeHtml(worldMessage)}</div>` : ''}
 
 <h2>Quién está jugando</h2>
+<p data-poll="online" class="muted">${online.length ? online.map((c) => escapeHtml(c.name)).join(', ') : 'Nadie conectado.'}</p>
 <table><thead><tr><th>Personaje</th><th>Nivel</th><th>Clase</th><th>Raza</th></tr></thead>
 <tbody>${onlineRows}</tbody></table>
 

@@ -530,3 +530,16 @@ test('GET /admin/status.json returns online count and backup state, guarded', as
   assert.equal(body.backup.done, 1);
   await fastify.close();
 });
+
+test('GET /online.json returns the online human names for a family session', async () => {
+  const { fastify } = await buildFamily({
+    db: stubDb({ async listOnlineCharacters() { return [{ name: 'Ninadruida', level: 23, classId: 11, raceId: 4, accountName: 'NINA' }]; } }),
+  });
+  const noauth = await fastify.inject({ method: 'GET', url: '/online.json' });
+  assert.equal(noauth.statusCode, 302); // redirected to /login (no session)
+  const { cookie } = await loginAs(fastify, 'nina', 'kidpw');
+  const res = await fastify.inject({ method: 'GET', url: '/online.json', headers: { cookie } });
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(JSON.parse(res.body).names, ['Ninadruida']);
+  await fastify.close();
+});

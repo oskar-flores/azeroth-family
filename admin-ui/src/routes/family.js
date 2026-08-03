@@ -17,6 +17,14 @@ export default async function familyRoutes(fastify, { db, auth, soap }) {
 
   fastify.get('/healthz', async (request, reply) => reply.send({ ok: true }));
 
+  fastify.get('/online.json', async (request, reply) => {
+    const session = sessionFrom(request);
+    if (!session) return reply.redirect('/login');
+    const realmState = await probeRealm(soap);
+    const online = realmState.up ? await db.listOnlineCharacters().catch(() => []) : [];
+    return reply.send({ names: online.map((c) => c.name), realmUp: realmState.up });
+  });
+
   fastify.get('/login', async (request, reply) => {
     if (sessionFrom(request)) return reply.redirect('/');
     // The realm address is useful on the login page and must not break it.
@@ -78,6 +86,7 @@ export default async function familyRoutes(fastify, { db, auth, soap }) {
       realmUp: realmState.up,
       online: realmState.up ? online : [],
       characters,
+      poll: '/online.json',
       worldMessage: realmState.up ? undefined
         : 'El servidor está apagado ahora mismo. Tus personajes están a salvo.',
     }));
