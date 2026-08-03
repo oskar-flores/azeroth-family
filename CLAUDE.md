@@ -18,10 +18,19 @@ is cloned on demand into `src/`, which is **gitignored and disposable**.
 Two stages, deliberately separated:
 
 1. **Build machine** — `build-and-push.sh` clones the core + modules into `src/`
-   and produces four Docker images. Three (`worldserver`, `authserver`,
+   and produces five Docker images. Three (`worldserver`, `authserver`,
    `db-import`) come from one `docker build --target` each against the core's own
    `apps/docker/Dockerfile` and share a single compile stage, so it is one
-   compile, not three. The fourth (`llm-chatter-bridge`) is built from
+   compile, not three.
+
+   Since 2026-08, the core and every module are pinned by commit rather than
+   tracked by branch, and `TAG` is derived from the core pin
+   (`<date>-<core-short-sha>`). `--update` no longer moves anything: it reports
+   what the pins would become. `--fetch-only` resolves and checks out the pins
+   without the 40-90 minute compile. `latest` is still published alongside the
+   pinned tag, which is what keeps an existing Dokploy deploy working.
+
+   The fourth (`llm-chatter-bridge`) is built from
    `docker/llm-chatter-bridge.Dockerfile` with the *module* directory as context
    — a pip install, seconds not hours.
 2. **Dokploy host** — `docker-compose.yml` only *pulls* images. Compose has no
@@ -33,6 +42,12 @@ all. `mod-playerbots` requires the forked core
 (`mod-playerbots/azerothcore-wotlk`, branch `Playerbot`) — stock AzerothCore
 images will not work, and `build-and-push.sh` hard-fails if `origin` isn't the
 fork.
+
+Two more modules compile in alongside `mod-playerbots` but need no service of
+their own: `mod-autobalance` scales dungeon mobs and bosses to group size —
+config-only, ships no SQL. `mod-transmog` adds cosmetic gear appearances, ships
+SQL, and needs a one-time in-game `.npc add 190010` per capital, since its NPC
+gossip menu is the only interface.
 
 ### Container roles in the stack
 
@@ -209,11 +224,19 @@ after any config change. Shell changes are verified by running the script.
 - **Server data files must stay enUS.** Playerbots' spell logic matches English
   spell names. Spanish comes from the client's own files plus the world DB's
   `*_locale` tables; `DBC.Locale = 255` and the stock `acore/ac-wotlk-client-data`
-  image are correct as-is. Bot conversation is Spanish separately, via
-  `LLMChatter.Language = ES`. That module deliberately keeps WoW proper nouns in
-  English — a bot says "Stormwind" while an esES client renders *Ventormenta*.
-  That seam is intentional and matches the server data; don't "fix" it by
-  localising DBCs.
+  image are correct as-is. Don't "fix" anything by localising DBCs.
+- **Bot chat, unlike server data, does use Spanish proper nouns — and that is a
+  patch, not a setting.** `mod-llm-chatter` hard-codes "keep WoW proper nouns in
+  English" into `get_language_rule()` (`tools/chatter_shared.py:1288-1312`) and
+  exposes no config key, data file, plugin hook or endpoint to change it. The
+  clause is rewritten in `docker/llm-chatter-bridge.Dockerfile`, immediately
+  after `COPY tools/ /app/`, guarded by a `sys.exit` that fails the build if
+  upstream moves the string. The two halves are not in tension: the kids' clients
+  are esES, so Spanish names in chat *match* what is on screen, and nothing about
+  server data moves. If a rebuild ever prints "the proper-noun clause was not
+  found", re-read `get_language_rule()` and update the block — do not delete it.
+  Verify with:
+  `docker run --rm --entrypoint python <bridge-image> -c "import chatter_shared as c; c.set_language('ES'); print(c.get_language_rule())"`
 - **Switching the LLM provider is not a rebuild.** `LLMChatter.Provider` /
   `Model` / `Ollama.BaseUrl` are runtime settings handled by the Python bridge;
   Anthropic → local Ollama is those lines plus a bridge restart. The local target
