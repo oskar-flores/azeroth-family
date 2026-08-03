@@ -123,8 +123,9 @@ def build_mount_block(conf_content: str) -> str:
         "# fetches only template.toml + docker-compose.yml, so the conf travels\n"
         "# here; Dokploy writes it to its /files dir, which docker-compose.yml\n"
         "# mounts as ../files/llm-chatter-settings.conf. Source of truth:\n"
-        "# /llm-chatter-settings.conf (public -- no secrets; the Anthropic key\n"
-        "# comes from ANTHROPIC_API_KEY, the DB password from DB_ROOT_PASSWORD).\n"
+        "# /llm-chatter-settings.conf (public -- no secrets; the API key for\n"
+        "# whichever LLMChatter.Provider it names comes from OPENROUTER_API_KEY or\n"
+        "# ANTHROPIC_API_KEY, the DB password from DB_ROOT_PASSWORD).\n"
         "[[config.mounts]]\n"
         'filePath = "llm-chatter-settings.conf"\n'
         "content = '''\n"
@@ -185,7 +186,10 @@ def main() -> None:
     print(f"embedded llm-chatter-settings.conf ({len(conf_content.splitlines())} lines) -> {OUT_TOML.relative_to(ROOT)}")
 
     print("\nverify:")
-    print("  DB_ROOT_PASSWORD=x REALM_ADDRESS=100.0.0.0 ANTHROPIC_API_KEY=x \\")
+    # No API key here on purpose: neither compose may make one mandatory, since
+    # the bridge entrypoint -- not compose -- is what enforces the key matching
+    # LLMChatter.Provider. A `:?` creeping back in would fail this line.
+    print("  DB_ROOT_PASSWORD=x REALM_ADDRESS=100.0.0.0 \\")
     print("    docker compose -f dokploy-template/blueprints/azeroth-family/docker-compose.yml config --quiet")
 
 

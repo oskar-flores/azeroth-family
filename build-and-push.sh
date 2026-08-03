@@ -48,8 +48,9 @@ EXTRA_MODULES=(
   # LLM-driven bot chat. Replaces playerbots' built-in chat with generated
   # dialogue in Spanish. The C++ half compiles in here; the Python half runs
   # as the separate ac-llm-chatter-bridge image built at the end of this
-  # script. Provider (Anthropic now, local Ollama later) is a runtime setting
-  # in llm-chatter-settings.conf -- switching does NOT need another build.
+  # script. Provider (OpenRouter -> DeepSeek now, local Ollama later) is a
+  # runtime setting in llm-chatter-settings.conf -- switching does NOT need
+  # another build, only a restart of that one container.
   "mod-llm-chatter|https://github.com/Hokken/mod-llm-chatter.git|master|97274f8106c33bff3a1c9a8f13944920598921fb"
   # Scales dungeon mobs and bosses to group size. No SQL, config only.
   # Pinned to a master commit rather than upstream's own `stable` tag on
@@ -462,5 +463,7 @@ Next: in Dokploy > Environment, set
 then redeploy. Leaving IMAGE_TAG unset keeps pulling :latest, which still
 works but is not rollback-able.
 
-Also set ANTHROPIC_API_KEY -- the bridge refuses to start without it.
+Also set OPENROUTER_API_KEY -- the bridge refuses to start without the key for
+whichever LLMChatter.Provider llm-chatter-settings.conf names (openrouter today).
+Setting ANTHROPIC_API_KEY too makes reverting to Haiku a conf edit and a restart.
 EOF

@@ -207,9 +207,10 @@ services:
   # on, the bridge polls them, calls the API, and writes replies back for
   # delivery on the next world tick. No API call ever blocks the server.
   #
-  # Provider is set in llm-chatter-settings.conf, not here. Switching from
-  # Anthropic to a local Ollama box later is that file plus a restart of this
-  # one container -- the images do not change.
+  # Provider is set in llm-chatter-settings.conf, not here -- currently
+  # OpenRouter -> deepseek/deepseek-v4-flash. Switching back to Anthropic, or
+  # on to a local Ollama box, is that file plus a restart of this one
+  # container; the images do not change.
   ac-llm-chatter-bridge:
     image: ${IMAGE_PREFIX:-azeroth-family}/llm-chatter-bridge:${IMAGE_TAG:-latest}
     container_name: ac-llm-chatter-bridge
@@ -217,7 +218,13 @@ services:
     networks: [ac-network]
     environment:
       # Assembled into the config at container start. Never written to git.
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:?set ANTHROPIC_API_KEY in Dokploy}
+      # Both are optional HERE on purpose: the image's entrypoint injects only
+      # the key matching LLMChatter.Provider and fails loudly if that one is
+      # missing. A `:?` on either would instead break `docker compose config`
+      # and every deploy for anyone not using that provider. Set both in
+      # Dokploy and switching providers needs no new secret.
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       DB_ROOT_PASSWORD: ${DB_ROOT_PASSWORD}
     volumes:
       - ./llm-chatter-settings.conf:/config/llm-chatter-settings.conf:ro

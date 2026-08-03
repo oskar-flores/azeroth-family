@@ -112,8 +112,8 @@ every documented key is wired up: `AIPlayerbot.GuildFeedback` appears in
 
 Deployment values (`DB_ROOT_PASSWORD`, `DB_BUFFER_POOL`, `REALM_ADDRESS`,
 `BIND_ADDR`, `IMAGE_PREFIX`, `IMAGE_TAG`, ports, `REALM_NAME`,
-`ANTHROPIC_API_KEY`) are *not* in `family.env` — they go in Dokploy's Environment
-tab, templated by `.env.example`.
+`OPENROUTER_API_KEY`, `ANTHROPIC_API_KEY`) are *not* in `family.env` — they go in
+Dokploy's Environment tab, templated by `.env.example`.
 
 ### The second config pipeline: `llm-chatter-settings.conf`
 
@@ -161,7 +161,7 @@ python3 scripts/ini2env.py family-settings.ini | diff - family.env
 REGISTRY=ghcr.io/oskar-flores ./build-and-push.sh --push
 
 # read what the bots actually said (no content filter exists; this is the
-# only visibility). Requires ANTHROPIC_API_KEY set in Dokploy.
+# only visibility). Requires OPENROUTER_API_KEY set in Dokploy.
 docker exec ac-llm-chatter-bridge tail -f /logs/llm_requests.jsonl
 
 # operate (run on the Docker host)
@@ -247,10 +247,14 @@ after any config change. Shell changes are verified by running the script.
   (`:1242-1251`) are a separate mechanism it does not cover.
 - **With the LLM there is no auditable corpus, so the request log is the
   control.** Playerbots' own chat is now off and `mod-llm-chatter` generates
-  dialogue instead. Neither that module nor `mod-ollama-chat` has a content
-  filter, so `LLMChatter.RequestLog.Enable = 1` and the lowered
-  `Temperature = 0.4` are doing the work that grepping a text table used to do.
-  Don't turn the log off to save disk.
+  dialogue instead — currently `deepseek/deepseek-v4-flash` via OpenRouter,
+  moved off `claude-haiku-4-5` on cost. Neither that module nor
+  `mod-ollama-chat` has a content filter, so `LLMChatter.RequestLog.Enable = 1`
+  and the lowered `Temperature = 0.4` are doing the work that grepping a text
+  table used to do. Don't turn the log off to save disk. The log carries more
+  weight since the model change, not less: part of what made an unfiltered LLM
+  acceptable was Anthropic's alignment, which no setting in this repo
+  replaces — a model swap earns a fresh week of reading it.
 - **Server data files must stay enUS.** Playerbots' spell logic matches English
   spell names. Spanish comes from the client's own files plus the world DB's
   `*_locale` tables; `DBC.Locale = 255` and the stock `acore/ac-wotlk-client-data`
@@ -269,10 +273,28 @@ after any config change. Shell changes are verified by running the script.
   `docker run --rm --entrypoint python <bridge-image> -c "import chatter_shared as c; c.set_language('ES'); print(c.get_language_rule())"`
 - **Switching the LLM provider is not a rebuild.** `LLMChatter.Provider` /
   `Model` / `Ollama.BaseUrl` are runtime settings handled by the Python bridge;
-  Anthropic → local Ollama is those lines plus a bridge restart. The local target
-  is a 4B model (`qwen3:4b`), not a 1B one — upstream warns smaller models
-  produce malformed JSON, and the bridge needs structured output, so a weak model
-  fails outright rather than merely sounding worse.
+  OpenRouter → Anthropic → local Ollama is those lines plus a bridge restart.
+  What makes that true across *cloud* providers is the entrypoint in
+  `docker/llm-chatter-bridge.Dockerfile`: it resolves the effective
+  `LLMChatter.Provider` out of the assembled config and injects only that
+  provider's key, so `OPENROUTER_API_KEY` and `ANTHROPIC_API_KEY` can both sit
+  in Dokploy and neither is mandatory in `docker-compose.yml`. Don't put a `:?`
+  back on either — that breaks `docker compose config` for anyone not using
+  that provider. The entrypoint **refuses** `openai` and `google` on purpose:
+  the module accepts them, but their `conf.dist` placeholder keys
+  (`sk-xxxxx`, `AIza-xxxxx`) are non-empty, and the bridge's only guard is
+  `if not api_key`, so a placeholder yields a container that starts clean and
+  401s on every bot line. Adding one means adding a `case` arm *and* the env
+  var in compose. The local target is a 4B model (`qwen3:4b`), not a 1B one —
+  upstream warns smaller models produce malformed JSON, and the bridge needs
+  structured output, so a weak model fails outright rather than merely
+  sounding worse.
+- **The OpenRouter model slug floats, unlike everything else here.**
+  `deepseek/deepseek-v4-flash` resolves to a dated build that DeepSeek can
+  repoint — the property this repo deliberately refuses for the core and every
+  module. It's tolerable only because a bad model surfaces in the request log
+  and reverting is one line. `deepseek/deepseek-v4-flash-0731` is the frozen
+  snapshot to pin when ruling the model out as a cause.
 - **`Ctrl-C` on the worldserver console stops the realm.** Detach with `Ctrl-P`
   `Ctrl-Q`; `admin.sh` sets `--detach-keys` for this reason.
 - Bot load is tuned by `AiPlayerbot.MinRandomBots` / `MaxRandomBots` (currently
