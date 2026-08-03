@@ -53,7 +53,7 @@ azeroth-family/
 ├── family.env                 generated from the ini; never hand-edit
 ├── llm-chatter-settings.conf  bot dialogue (deltas over upstream defaults)
 ├── dokploy-template/          one-click Dokploy template (custom source)
-├── docker/                    Dockerfile for the llm-chatter bridge
+├── docker/                    Dockerfiles for the llm-chatter bridge and admin-ui
 ├── admin-ui/                  the web console (Fastify, no bundler)
 └── scripts/
     ├── ini2env.py             .ini keys → AC_* env vars (self-tests)

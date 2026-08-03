@@ -143,7 +143,7 @@ marked `[BRIDGE]` upstream only take effect after restarting
 
 ```bash
 # config
-python3 scripts/ini2env.py --selftest              # 9/9; run after touching ini2env.py
+python3 scripts/ini2env.py --selftest              # 13/13; run after touching ini2env.py
 python3 scripts/ini2env.py --key Rate.XP.Kill      # look up one AC_* name
 python3 scripts/ini2env.py family-settings.ini > family.env
 
@@ -152,7 +152,8 @@ python3 scripts/ini2env.py family-settings.ini | diff - family.env
 
 # build (build machine; ~40-90 min cold, needs ~8 GB free RAM)
 ./build-and-push.sh                                # local images: azeroth-family/*
-./build-and-push.sh --update                       # pull core + modules first
+./build-and-push.sh --fetch-only                   # resolve + check out the pins, no compile
+./build-and-push.sh --update                       # report what the pins would become; nothing moves
 REGISTRY=ghcr.io/oskar-flores ./build-and-push.sh --push
 
 # read what the bots actually said (no content filter exists; this is the
