@@ -60,6 +60,15 @@ EXTRA_MODULES=(
   # Cosmetic gear appearance. Ships SQL under data/sql/db-{world,characters,
   # auth}/, which dbimport picks up from modules/ -- do NOT stage it anywhere.
   "mod-transmog|https://github.com/azerothcore/mod-transmog.git|master|0d85cbc53d63ce2df8527169ce6ae47f5f6f6ba8"
+  # Server half of the MultiBot addon: answers structured MBOT addon messages so
+  # the addon can drive bots through a UI instead of parsing localized bot chat
+  # -- which is the point here, the kids' clients being esES. Requires
+  # mod-playerbots and no SQL. Note `main`, not `master`. It does nothing on its
+  # own: the client addon that drives it is deliberately not shipped from this
+  # repo. It also includes playerbots internals directly (PlayerbotAI.h,
+  # AiObjectContext.h, BudgetValues.h), so it is the module most likely to break
+  # when the playerbots pin moves.
+  "mod-multibot-bridge|https://github.com/Wishmaster117/mod-multibot-bridge.git|main|fba3d2464fc9d36d50b3176535e5881c231449f6"
 )
 
 # A container found running on the host should be traceable to its sources
@@ -190,9 +199,9 @@ report_updates() {
     head=$(git ls-remote "$url" "refs/heads/$branch" | cut -f1)
     [[ -n "$head" ]] || die "could not read $branch from $url"
     if [[ "$head" == "$pinned"* ]]; then
-      printf '    %-18s %-41s up to date\n' "$name" "$pinned"
+      printf '    %-19s %-41s up to date\n' "$name" "$pinned"
     else
-      printf '    %-18s %-41s -> %s\n' "$name" "$pinned" "${head:0:7}"
+      printf '    %-19s %-41s -> %s\n' "$name" "$pinned" "${head:0:7}"
       stale=1
     fi
   done <<EOF

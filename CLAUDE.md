@@ -46,11 +46,14 @@ all. `mod-playerbots` requires the forked core
 images will not work, and `build-and-push.sh` hard-fails if `origin` isn't the
 fork.
 
-Two more modules compile in alongside `mod-playerbots` but need no service of
+Three more modules compile in alongside `mod-playerbots` but need no service of
 their own: `mod-autobalance` scales dungeon mobs and bosses to group size —
 config-only, ships no SQL. `mod-transmog` adds cosmetic gear appearances, ships
 SQL, and needs a one-time in-game `.npc add 190010` per capital, since its NPC
-gossip menu is the only interface.
+gossip menu is the only interface. `mod-multibot-bridge` answers structured
+`MBOT` addon messages so bots can be driven from a UI rather than by typing chat
+commands — no SQL, one config key, and see the two notes below before touching
+it.
 
 ### Container roles in the stack
 
@@ -207,7 +210,27 @@ after any config change. Shell changes are verified by running the script.
   its own `CLAUDE.md`/`AGENTS.md` from upstream — those apply to core C++ work,
   not to this repo.
 - **Core and module update together.** Mixing versions gives compile errors or
-  runtime crashes.
+  runtime crashes. `mod-multibot-bridge` is the sharpest edge of this: it
+  `#include`s playerbots internals directly (`PlayerbotAI.h`,
+  `AiObjectContext.h`, `BudgetValues.h`, `ChatHelper.h`), so it is the first
+  thing to break when the playerbots pin moves. If a build fails inside
+  `MultiBotBridge.cpp`, the module has not caught up to the core — don't patch
+  the module or drag the playerbots pin backwards to suit it.
+- **`MultiBotBridge.EnableConsoleLogs = 0` in `family-settings.ini` is load-
+  bearing, not a restatement of the default.** The module's *code* default is
+  `1` (`MultiBotBridge.cpp:53`); its `conf.dist` says `0` and is never read.
+  CMake installs `MultiBotBridge.conf.dist` but registers the name with the
+  suffix stripped (`modules/CMakeLists.txt:361`), so the core looks for
+  `MultiBotBridge.conf`, which nothing creates, and `Config.cpp` has no `.dist`
+  fallback. Delete the line as redundant and every addon UI refresh starts
+  writing RX/TX lines to the worldserver console. No mount is needed to fix
+  this — `GetValueDefault` (`Config.cpp:601-620`) checks the environment before
+  the not-found branch, so the `AC_*` var wins with no config file present at
+  all. That is why this module, unlike `mod-llm-chatter`, has no mounted
+  `.conf`: there is no second process that needs to read the same file.
+- **A silent `mod-multibot-bridge` is not a broken build.** It does nothing
+  until the MultiBot client addon is installed on a PC, and shipping or
+  documenting that addon is deliberately out of scope for this repo.
 - **`BIND_ADDR` is the security boundary.** Pinning the published ports to the
   Tailscale IP means the socket only exists on the tailnet — that plus the
   absence of any self-registration is the entire closed-realm guarantee. Don't

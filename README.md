@@ -99,7 +99,13 @@ fetches the modules, verifies the module SQL is present, and builds five images:
 the core's own Dockerfile), `llm-chatter-bridge` and `admin-ui`.
 
 Compiled-in modules: `mod-playerbots`, `mod-llm-chatter`, `mod-autobalance`,
-`mod-transmog`.
+`mod-transmog`, `mod-multibot-bridge`.
+
+The last one is the server half of the MultiBot addon — it answers structured
+`MBOT` addon messages so bots can be managed from a UI instead of by typing chat
+commands. It has no effect until the matching client addon is installed on a PC,
+which this repo deliberately does not ship or document; a bridge that produces no
+visible change is not a broken build.
 
 ### Versions
 
