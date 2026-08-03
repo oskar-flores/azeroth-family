@@ -71,6 +71,14 @@ SELFTESTS = [
     ("MapUpdate.Threads", "AC_MAP_UPDATE_THREADS"),
     ("DurabilityLoss.OnDeath", "AC_DURABILITY_LOSS_ON_DEATH"),
     ("Death.CorpseReclaimDelay.PvE", "AC_DEATH_CORPSE_RECLAIM_DELAY_PV_E"),
+    # the new modules -- digit boundaries are exactly why this script exists
+    ("AutoBalance.Enable.5M", "AC_AUTO_BALANCE_ENABLE_5_M"),
+    ("AutoBalance.InflectionPointRaid10M.CurveFloor",
+     "AC_AUTO_BALANCE_INFLECTION_POINT_RAID_10_M_CURVE_FLOOR"),
+    ("AutoBalance.playerCountDifficultyOffset",
+     "AC_AUTO_BALANCE_PLAYER_COUNT_DIFFICULTY_OFFSET"),
+    ("Transmogrification.AllowMixedArmorTypes",
+     "AC_TRANSMOGRIFICATION_ALLOW_MIXED_ARMOR_TYPES"),
 ]
 
 
