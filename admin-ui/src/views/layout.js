@@ -56,7 +56,26 @@ const TAB_DEFS = [
   ['backups', 'Backups', '/admin#backups'],
 ];
 
-export function layout({ title, lang = 'es', body, user, section }) {
+export const POLL_SCRIPT = `
+<script>
+(function(){
+  function tick(){
+    fetch(document.body.getAttribute('data-poll-url'))
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (!d) return;
+        document.querySelectorAll('[data-poll]').forEach(el => {
+          const k = el.getAttribute('data-poll');
+          if (k === 'online' && typeof d.online === 'number') el.textContent = d.online + ' humans online';
+          if (k === 'online' && Array.isArray(d.names)) el.textContent = d.names.length ? d.names.join(', ') : 'Nadie conectado.';
+          if (k === 'backup') el.textContent = 'Backup: ' + d.backup.state + (d.backup.current ? ' (' + d.backup.current + ')' : '');
+        });
+      }).catch(()=>{});
+  }
+  setInterval(tick, 5000); tick();
+})();
+</script>`;
+
+export function layout({ title, lang = 'es', body, user, section, poll }) {
   const tabs = section
     ? `<nav class="tabs">${TAB_DEFS.map(([key, label, href]) =>
         `<a class="tab ${key === section ? 'active' : ''}" href="${href}">${escapeHtml(label)}</a>`).join('')}</nav>`
@@ -65,14 +84,14 @@ export function layout({ title, lang = 'es', body, user, section }) {
 <html lang="${escapeHtml(lang)}">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${escapeHtml(title)}</title><style>${STYLE}</style></head>
-<body><main>
+<body${poll ? ` data-poll-url="${escapeHtml(poll)}"` : ''}><main>
 <div class="bar"><h1>${escapeHtml(title)}</h1>${user
   ? `<form action="/logout" method="post"><span class="muted">${escapeHtml(user.username)}</span>
      <button type="submit">${lang === 'es' ? 'Salir' : 'Log out'}</button></form>`
   : ''}</div>
 ${tabs}
 ${body}
-</main></body></html>`;
+</main>${poll ? POLL_SCRIPT : ''}</body></html>`;
 }
 
 export const realmPill = (up, lang) => up

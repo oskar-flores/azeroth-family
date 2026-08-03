@@ -23,6 +23,7 @@ export const ADMIN_ROUTES = [
   { method: 'GET', url: '/admin/restore/some_2026-01-01_0000.sql.gz' },
   { method: 'GET', url: '/admin/mailbox' },
   { method: 'GET', url: '/admin/maintenance' },
+  { method: 'GET', url: '/admin/status.json' },
 ];
 
 export default async function adminRoutes(fastify, { db, auth, soap, backups, audit }) {
@@ -41,7 +42,7 @@ export default async function adminRoutes(fastify, { db, auth, soap, backups, au
     ]);
 
     return reply.code(code).type('text/html; charset=utf-8').send(layout({
-      title: 'Realm admin', lang: 'en', user, section: 'overview',
+      title: 'Realm admin', lang: 'en', user, section: 'overview', poll: '/admin/status.json',
       body: overviewPage({ user, realm, realmUp, serverInfo, online, backupStatus: backups.status(), noticeList: notices }),
     }));
   }
@@ -159,6 +160,19 @@ export default async function adminRoutes(fastify, { db, auth, soap, backups, au
     const user = await requireAdmin(request, reply, auth);
     if (!user) return reply;
     return reply.send(backups.status());
+  });
+
+  fastify.get('/admin/status.json', async (request, reply) => {
+    const user = await requireAdmin(request, reply, auth);
+    if (!user) return reply;
+    const [online, backupStatus] = await Promise.all([
+      db.listOnlineCharacters().catch(() => []),
+      backups.status(),
+    ]);
+    return reply.send({
+      online: online.length,
+      backup: { state: backupStatus.state, current: backupStatus.current, done: backupStatus.done?.length ?? 0 },
+    });
   });
 
   fastify.get('/admin/backup/:name', async (request, reply) => {

@@ -512,3 +512,21 @@ test('the un-built section tabs resolve to a stub, not a 404', async () => {
   }
   await fastify.close();
 });
+
+test('GET /admin/status.json returns online count and backup state, guarded', async () => {
+  const { fastify } = await buildAdmin({
+    db: stubDb({ async listOnlineCharacters() { return [{}, {}, {}]; } }),
+    backups: stubBackups({ status: () => ({ state: 'running', current: 'acore_auth', done: ['x'] }) }),
+  });
+  const noauth = await fastify.inject({ method: 'GET', url: '/admin/status.json' });
+  assert.equal(noauth.statusCode, 403);
+  const cookie = await sessionFor(fastify, 'papa', 'goodpw');
+  const res = await fastify.inject({ method: 'GET', url: '/admin/status.json', headers: { cookie } });
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.headers['content-type'], 'application/json; charset=utf-8');
+  const body = JSON.parse(res.body);
+  assert.equal(body.online, 3);
+  assert.equal(body.backup.state, 'running');
+  assert.equal(body.backup.done, 1);
+  await fastify.close();
+});
