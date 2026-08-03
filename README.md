@@ -169,7 +169,7 @@ unauthenticated HTTP, so the repo must be public):
 https://raw.githubusercontent.com/oskar-flores/azeroth-family/main/dokploy-template
 ```
 "Azeroth Family Server" appears under Templates. Install it, set `realm_address`
-to your Tailscale IP and `anthropic_api_key` to your Anthropic key, deploy. The
+to your Tailscale IP and `openrouter_api_key` to your OpenRouter key, deploy. The
 images must already exist on the host — build first (or set `image_prefix` to a
 registry you've pushed to). The kid settings are baked into the template; when you
 change `family-settings.ini` or `llm-chatter-settings.conf`, regenerate it too:
@@ -278,10 +278,12 @@ the import. Restores stay in `admin.sh`:
 
 Bot chat is pinned explicitly in the ini: the toxic-phrase and toxic-link reply
 chances (some are ON upstream) are set to 0, and bot dialogue now runs through
-`mod-llm-chatter` in Spanish instead of the fixed English phrase table. The
+`mod-llm-chatter` in Spanish instead of the fixed English phrase table. That
+dialogue comes from `deepseek/deepseek-v4-flash` via OpenRouter — set in
+`llm-chatter-settings.conf`, changeable with a restart and no rebuild. The
 request log (`LLMChatter.RequestLog.Enable`) is the only visibility into what bots
 say — keep it on. Neither module has a content filter, so eyeball the dialogue
-yourself before turning kids loose.
+yourself before turning kids loose, and eyeball it again after any model change.
 
 ---
 

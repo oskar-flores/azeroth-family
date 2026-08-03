@@ -25,9 +25,15 @@ image_tag = "latest"
 client_data_tag = "17.0.0-dev"
 auth_port = "3724"
 world_port = "8085"
-# REQUIRED: the Anthropic key the llm-chatter-bridge uses to talk in Spanish.
+# REQUIRED: the OpenRouter key the llm-chatter-bridge uses to talk in Spanish.
 # Replace the placeholder at install. No secrets are baked into the template.
-anthropic_api_key = "YOUR_ANTHROPIC_API_KEY"
+# Get one at https://openrouter.ai/keys and put a spend limit on it -- the bots
+# chat continuously. LLMChatter.Provider in the mounted conf below decides which
+# key is actually used; it is `openrouter` today.
+openrouter_api_key = "YOUR_OPENROUTER_API_KEY"
+# OPTIONAL: only read if you edit the mounted llm-chatter-settings.conf to set
+# LLMChatter.Provider back to `anthropic`. Leave blank otherwise.
+anthropic_api_key = ""
 ui_port = "8080"
 # REQUIRED: a dedicated GM level 3 service account for ac-admin-ui's SOAP
 # actions -- NOT a family member's login. Create it on the Docker host with
@@ -49,6 +55,7 @@ IMAGE_TAG = "${image_tag}"
 CLIENT_DATA_TAG = "${client_data_tag}"
 AUTH_PORT = "${auth_port}"
 WORLD_PORT = "${world_port}"
+OPENROUTER_API_KEY = "${openrouter_api_key}"
 ANTHROPIC_API_KEY = "${anthropic_api_key}"
 UI_PORT = "${ui_port}"
 SOAP_USER = "${soap_user}"
@@ -59,8 +66,9 @@ SOAP_PASS = "${soap_pass}"
 # fetches only template.toml + docker-compose.yml, so the conf travels
 # here; Dokploy writes it to its /files dir, which docker-compose.yml
 # mounts as ../files/llm-chatter-settings.conf. Source of truth:
-# /llm-chatter-settings.conf (public -- no secrets; the Anthropic key
-# comes from ANTHROPIC_API_KEY, the DB password from DB_ROOT_PASSWORD).
+# /llm-chatter-settings.conf (public -- no secrets; the API key for
+# whichever LLMChatter.Provider it names comes from OPENROUTER_API_KEY or
+# ANTHROPIC_API_KEY, the DB password from DB_ROOT_PASSWORD).
 [[config.mounts]]
 filePath = "llm-chatter-settings.conf"
 content = '''
@@ -76,10 +84,11 @@ content = '''
 #    - ac-llm-chatter-bridge  (Python, makes the API calls)
 #    - ac-worldserver         (C++ side, mounted as etc/modules/mod_llm_chatter.conf)
 #
-#  NO SECRETS HERE. This file is committed to a public repo. The API key and
-#  the database password are appended at container start from Dokploy's
-#  environment -- see docker/llm-chatter-bridge.Dockerfile. Config is parsed
-#  last-wins, so the appended lines override anything above.
+#  NO SECRETS HERE. This file is committed to a public repo. The database
+#  password and the API key for whichever provider is selected below are
+#  appended at container start from Dokploy's environment -- see
+#  docker/llm-chatter-bridge.Dockerfile. Config is parsed last-wins, so the
+#  appended lines override anything above.
 #
 #  Keys marked [BRIDGE] in the upstream conf.dist only take effect after
 #  restarting ac-llm-chatter-bridge, not the worldserver.
@@ -87,11 +96,31 @@ content = '''
 
 
 # -----------------------------------------------------------------------------
-#  PROVIDER -- phase 1: Anthropic. Phase 2: local Ollama.
+#  PROVIDER -- OpenRouter -> DeepSeek V4 Flash. Eventually: local Ollama.
 # -----------------------------------------------------------------------------
-#  Moving to local inference later is a change to these three lines plus a
-#  bridge restart. No rebuild: the module is compiled once and every provider
-#  is handled by the Python bridge.
+#  Was claude-haiku-4-5 direct from Anthropic. Moved off it on cost: DeepSeek
+#  V4 Flash is roughly a tenth the price per token, and the bots chat
+#  continuously, so that is the whole bill rather than a rounding error.
+#
+#  The model slug below FLOATS. OpenRouter resolves `deepseek/deepseek-v4-flash`
+#  to a dated build (deepseek-v4-flash-20260423 at the time of writing) and
+#  DeepSeek can repoint it without telling us -- the same property as an
+#  unpinned image tag, which is exactly what this repo refuses to do for the
+#  core and every module. It is tolerable here only because a bad model shows
+#  up in the request log as bad dialogue and is one line to revert. If chat
+#  ever changes character for no reason, pin the frozen dated snapshot to rule
+#  the model out:
+#
+#      LLMChatter.Model = deepseek/deepseek-v4-flash-0731
+#
+#  Going BACK to Haiku is two lines here plus `docker restart
+#  ac-llm-chatter-bridge` -- no rebuild, provided ANTHROPIC_API_KEY is still
+#  set in Dokploy (leave it set; that is the whole point of keeping it):
+#
+#      LLMChatter.Provider = anthropic
+#      LLMChatter.Model    = claude-haiku-4-5-20251001
+#
+#  Moving to local inference later is the same shape of change:
 #
 #      LLMChatter.Provider = ollama
 #      LLMChatter.Model    = qwen3:4b
@@ -101,10 +130,16 @@ content = '''
 #  smaller models "frequently produce malformed JSON", and the bridge depends
 #  on structured output -- a model that rambles fails outright rather than
 #  just sounding worse.
+#
+#  The bridge image's entrypoint reads the Provider set below and injects only
+#  that provider's API key. Set it to `openai` or `google` and the container
+#  refuses to start rather than shipping upstream's placeholder key and
+#  401-ing on every bot line. OpenRouter.BaseUrl is left at the upstream
+#  default; HttpReferer and Title are attribution-only and stay empty.
 
 LLMChatter.Enable   = 1
-LLMChatter.Provider = anthropic
-LLMChatter.Model    = claude-haiku-4-5-20251001
+LLMChatter.Provider = openrouter
+LLMChatter.Model    = deepseek/deepseek-v4-flash
 
 
 # -----------------------------------------------------------------------------
@@ -165,6 +200,13 @@ LLMChatter.Temperature = 0.4
 #
 #  It is NOT a content filter. Neither this module nor mod-ollama-chat has
 #  one. It is after-the-fact review.
+#
+#  This log carries MORE weight since the move off Claude, not less. Part of
+#  what made an unfiltered LLM acceptable here was Anthropic's alignment doing
+#  work no setting in this file can do. DeepSeek V4 Flash is a different model
+#  with a different profile and the module still filters nothing, so read the
+#  log for a week after the cutover exactly the way it was read on the first
+#  deploy -- do not assume the earlier week of clean logs still applies.
 
 LLMChatter.RequestLog.Enable    = 1
 LLMChatter.RequestLog.Path      = /logs/llm_requests.jsonl

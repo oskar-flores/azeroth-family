@@ -17,7 +17,9 @@
 FROM python:3.11-slim
 
 # anthropic, openai, mysql-connector-python. Pinned by upstream's own file so
-# a rebuild picks up whatever the module currently expects.
+# a rebuild picks up whatever the module currently expects. The `openai`
+# package is the one that matters for us -- OpenRouter is reached through its
+# OpenAI-compatible client, not a library of its own.
 COPY tools/requirements.txt /tmp/requirements.txt
 RUN pip install --no-cache-dir -r /tmp/requirements.txt && rm /tmp/requirements.txt
 
@@ -82,20 +84,80 @@ COPY conf/mod_llm_chatter.conf.dist /defaults/mod_llm_chatter.conf.dist
 WORKDIR /app
 ENV PYTHONUNBUFFERED=1
 
-# Secrets are assembled here rather than baked in. parse_config() in
+# --- entrypoint --------------------------------------------------------------
+# Secrets are assembled at start rather than baked in. parse_config() in
 # chatter_shared.py is last-wins, so the order below is what makes the
 # layering work:
 #
 #     upstream defaults  ->  our committed overrides  ->  secrets from env
 #
 # Nothing sensitive is ever written to an image layer or to git.
-CMD ["sh", "-c", "\
-set -e; \
-[ -n \"$ANTHROPIC_API_KEY\" ] || { echo 'ANTHROPIC_API_KEY is not set -- add it in Dokploy > Environment' >&2; exit 1; }; \
-[ -n \"$DB_ROOT_PASSWORD\" ] || { echo 'DB_ROOT_PASSWORD is not set' >&2; exit 1; }; \
-[ -r /config/llm-chatter-settings.conf ] || { echo 'llm-chatter-settings.conf is not mounted at /config' >&2; exit 1; }; \
-cat /defaults/mod_llm_chatter.conf.dist /config/llm-chatter-settings.conf > /tmp/mod_llm_chatter.conf; \
-printf 'LLMChatter.Anthropic.ApiKey = %s\\n' \"$ANTHROPIC_API_KEY\" >> /tmp/mod_llm_chatter.conf; \
-printf 'LLMChatter.Database.Password = %s\\n' \"$DB_ROOT_PASSWORD\" >> /tmp/mod_llm_chatter.conf; \
-exec python llm_chatter_bridge.py --config /tmp/mod_llm_chatter.conf\
-"]
+#
+# This is a script rather than the one-line `CMD ["sh", "-c", ...]` it replaces
+# because it now branches on the provider. Written by heredoc rather than
+# COPYed for the same reason as the proper-noun patch above: the build context
+# is the MODULE directory, so nothing in this repo's docker/ is reachable.
+#
+# WHY IT BRANCHES. Upstream's conf.dist ships non-empty PLACEHOLDER keys --
+# 'sk-or-v1-xxxxx', 'sk-xxxxx', 'AIza-xxxxx' -- and the bridge's only guard is
+# `if not api_key: sys.exit(1)`. A placeholder is truthy, so injecting the
+# wrong provider's key gives a container that starts perfectly and then 401s on
+# every single bot line, with the realm looking healthy the whole time. Tying
+# the injection to the selected provider is what makes that unrepresentable.
+#
+# The payoff is that Anthropic <-> OpenRouter <-> Ollama is a config edit plus
+# `docker restart ac-llm-chatter-bridge`, with no rebuild -- set both keys in
+# Dokploy and only the one matching LLMChatter.Provider is ever written.
+RUN cat > /usr/local/bin/bridge-entrypoint.sh <<'SH' && chmod +x /usr/local/bin/bridge-entrypoint.sh
+#!/bin/sh
+set -eu
+
+fail() { echo "ac-llm-chatter-bridge: $*" >&2; exit 1; }
+
+[ -n "${DB_ROOT_PASSWORD:-}" ] || fail "DB_ROOT_PASSWORD is not set"
+[ -r /config/llm-chatter-settings.conf ] ||
+  fail "llm-chatter-settings.conf is not mounted at /config"
+
+CONF=/tmp/mod_llm_chatter.conf
+cat /defaults/mod_llm_chatter.conf.dist /config/llm-chatter-settings.conf > "$CONF"
+
+# Effective provider: last match wins, matching parse_config(). Anchoring at
+# line start skips the commented-out examples in llm-chatter-settings.conf.
+# Absent -> anthropic, which is what llm_chatter_bridge.py defaults to.
+provider=$(
+  grep -iE '^[[:space:]]*LLMChatter\.Provider[[:space:]]*=' "$CONF" |
+    tail -1 | cut -d= -f2- | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]'
+)
+[ -n "$provider" ] || provider=anthropic
+
+case "$provider" in
+  openrouter)
+    [ -n "${OPENROUTER_API_KEY:-}" ] ||
+      fail "LLMChatter.Provider is openrouter but OPENROUTER_API_KEY is not set -- add it in Dokploy > Environment"
+    printf 'LLMChatter.OpenRouter.ApiKey = %s\n' "$OPENROUTER_API_KEY" >> "$CONF"
+    ;;
+  anthropic)
+    [ -n "${ANTHROPIC_API_KEY:-}" ] ||
+      fail "LLMChatter.Provider is anthropic but ANTHROPIC_API_KEY is not set -- add it in Dokploy > Environment"
+    printf 'LLMChatter.Anthropic.ApiKey = %s\n' "$ANTHROPIC_API_KEY" >> "$CONF"
+    ;;
+  ollama)
+    # Local inference, no key. LLMChatter.Ollama.BaseUrl must point at a host
+    # this container can reach -- not localhost, which is the container itself.
+    ;;
+  *)
+    fail "LLMChatter.Provider is '$provider', which this image cannot inject a key for.
+Supported: openrouter, anthropic, ollama. The module also accepts openai and
+google, but their conf.dist placeholder keys are non-empty, so the bridge would
+start clean and then fail every request -- refusing instead. Add a case here and
+the matching env var in docker-compose.yml if you need one of them."
+    ;;
+esac
+
+printf 'LLMChatter.Database.Password = %s\n' "$DB_ROOT_PASSWORD" >> "$CONF"
+
+echo "ac-llm-chatter-bridge: provider=$provider"
+exec python llm_chatter_bridge.py --config "$CONF"
+SH
+
+CMD ["/usr/local/bin/bridge-entrypoint.sh"]
