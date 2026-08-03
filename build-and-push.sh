@@ -5,9 +5,10 @@
 # There is no maintained prebuilt playerbots image (see README), so we compile
 # once here and hand finished images to Dokploy. Dokploy never compiles anything.
 #
-#   ./build-and-push.sh              build locally, tag as azeroth-family/*
-#   ./build-and-push.sh --push       also push to $REGISTRY (needs docker login)
-#   ./build-and-push.sh --update     git pull core + modules first, then build
+#   ./build-and-push.sh               build locally, tag as azeroth-family/*
+#   ./build-and-push.sh --push        also push to $REGISTRY (needs docker login)
+#   ./build-and-push.sh --update      report pinned refs vs upstream heads, then exit
+#   ./build-and-push.sh --fetch-only  fetch + checkout the pinned refs, then exit (no build)
 #
 # First build: 40-90 min and it wants ~8 GB RAM free. Later builds reuse ccache
 # and are much faster.
@@ -126,7 +127,8 @@ fetch_pinned() {
     git -C "$dir" remote add origin "$url"
   fi
 
-  # Prefix match: ref is usually a short SHA and HEAD is always full. A ref
+  # Refs are always full 40-char SHAs by construction, so this is an exact
+  # match, not really a prefix match -- no ambiguity, no collision risk. A ref
   # given as a tag name never matches, so it re-fetches every run -- correct,
   # just not free.
   local head
@@ -159,9 +161,9 @@ report_updates() {
     head=$(git ls-remote "$url" "refs/heads/$branch" | cut -f1)
     [[ -n "$head" ]] || die "could not read $branch from $url"
     if [[ "$head" == "$pinned"* ]]; then
-      printf '    %-18s %-9s up to date\n' "$name" "$pinned"
+      printf '    %-18s %-41s up to date\n' "$name" "$pinned"
     else
-      printf '    %-18s %-9s -> %s\n' "$name" "$pinned" "${head:0:7}"
+      printf '    %-18s %-41s -> %s\n' "$name" "$pinned" "${head:0:7}"
       stale=1
     fi
   done <<EOF
