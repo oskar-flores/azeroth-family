@@ -32,7 +32,9 @@ Two stages, deliberately separated:
 
    The fourth (`llm-chatter-bridge`) is built from
    `docker/llm-chatter-bridge.Dockerfile` with the *module* directory as context
-   — a pip install, seconds not hours.
+   — a pip install, seconds not hours. The fifth (`admin-ui`) is built from this
+   repo's own `admin-ui/` directory rather than the core sources — a Fastify app
+   with no bundler, so it's just as quick.
 2. **Dokploy host** — `docker-compose.yml` only *pulls* images. Compose has no
    `build:` stanza anywhere and must never gain one; a redeploy is ~30 seconds,
    not an hour.
