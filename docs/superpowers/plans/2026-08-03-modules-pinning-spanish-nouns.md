@@ -181,7 +181,7 @@ Run:
 ```bash
 grep -E '^AC_(AUTO_BALANCE|TRANSMOGRIFICATION)' family.env
 ```
-Expected: exactly 12 lines. `AC_AUTO_BALANCE_ENABLE_GLOBAL`, `AC_AUTO_BALANCE_MIN_PLAYERS`, `AC_AUTO_BALANCE_STAT_MODIFIER_GLOBAL`, `AC_TRANSMOGRIFICATION_ENABLE`, six `AC_TRANSMOGRIFICATION_IGNORE_REQ_*`, `AC_TRANSMOGRIFICATION_ALLOW_MIXED_ARMOR_TYPES`, `AC_TRANSMOGRIFICATION_ALLOW_LEGENDARY`, `AC_TRANSMOGRIFICATION_ENABLE_PLUS`.
+Expected: exactly 13 lines. `AC_AUTO_BALANCE_ENABLE_GLOBAL`, `AC_AUTO_BALANCE_MIN_PLAYERS`, `AC_AUTO_BALANCE_STAT_MODIFIER_GLOBAL`, `AC_TRANSMOGRIFICATION_ENABLE`, six `AC_TRANSMOGRIFICATION_IGNORE_REQ_*`, `AC_TRANSMOGRIFICATION_ALLOW_MIXED_ARMOR_TYPES`, `AC_TRANSMOGRIFICATION_ALLOW_LEGENDARY`, `AC_TRANSMOGRIFICATION_ENABLE_PLUS`.
 
 - [ ] **Step 8: Regenerate the Dokploy template**
 
@@ -190,10 +190,10 @@ The template inlines `family.env` into the worldserver's `environment:` block, s
 Run:
 ```bash
 python3 scripts/make-template-compose.py
-DB_ROOT_PASSWORD=x REALM_ADDRESS=100.0.0.0 ANTHROPIC_API_KEY=x \
+DB_ROOT_PASSWORD=x REALM_ADDRESS=100.0.0.0 ANTHROPIC_API_KEY=x SOAP_USER=x SOAP_PASS=x \
   docker compose -f dokploy-template/blueprints/azeroth-family/docker-compose.yml config --quiet
 ```
-Expected: the generator prints an inlined-settings count, and `config --quiet` produces no output and exits 0.
+Expected: the generator prints an inlined-settings count, and `config --quiet` produces no output and exits 0. (`SOAP_USER`/`SOAP_PASS` became required when `ac-admin-ui` shipped; without them the render fails.)
 
 - [ ] **Step 9: Commit**
 
@@ -948,7 +948,7 @@ Expected: prints `embedded llm-chatter-settings.conf (N lines) -> …/template.t
 Run:
 ```bash
 grep -c "Ventormenta" dokploy-template/blueprints/azeroth-family/template.toml
-DB_ROOT_PASSWORD=x REALM_ADDRESS=100.0.0.0 ANTHROPIC_API_KEY=x \
+DB_ROOT_PASSWORD=x REALM_ADDRESS=100.0.0.0 ANTHROPIC_API_KEY=x SOAP_USER=x SOAP_PASS=x \
   docker compose -f dokploy-template/blueprints/azeroth-family/docker-compose.yml config --quiet
 ```
 Expected: a count of at least 1, then no output and exit 0 from `config --quiet`.
@@ -1186,7 +1186,7 @@ Expected: both modules report loading. Then confirm the settings actually took, 
 ```bash
 docker exec ac-worldserver env | grep -E 'AC_AUTO_BALANCE|AC_TRANSMOGRIFICATION' | sort
 ```
-Expected: the same 12 variables verified in Task 1 Step 7.
+Expected: the same 13 variables verified in Task 1 Step 7.
 
 - [ ] **Step 7: Spawn the Transmog NPC**
 

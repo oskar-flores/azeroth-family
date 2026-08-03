@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1.7
 # =============================================================================
 #  mod-llm-chatter Python bridge
 # =============================================================================
@@ -22,6 +23,56 @@ RUN pip install --no-cache-dir -r /tmp/requirements.txt && rm /tmp/requirements.
 
 # The bridge itself: ~45 Python modules plus its data files.
 COPY tools/ /app/
+
+# --- Spanish proper nouns ----------------------------------------------------
+# Upstream hard-codes "keep WoW proper nouns in English" into get_language_rule()
+# in chatter_shared.py. There is no config key, data file, plugin hook, env var
+# or endpoint that changes it -- the whole module was checked -- so the string is
+# rewritten here.
+#
+# This runs on the already-COPYed file rather than as a patch applied to the
+# checkout, because the build context is the MODULE directory: a .patch living
+# in this repo's docker/ dir is not reachable by COPY. It also beats a diff on
+# merit -- a patch carries context lines and breaks on any nearby upstream edit,
+# whereas this breaks only when the clause itself changes, which is exactly when
+# a human should look.
+#
+# The sys.exit is the load-bearing part. A silent no-op would ship English names
+# and nobody would find out until a kid asked why the bot said "Stormwind".
+RUN python3 <<'PY'
+import pathlib, sys
+
+p = pathlib.Path("/app/chatter_shared.py")
+src = p.read_text(encoding="utf-8")
+
+OLD = (
+    '        "Exception: keep WoW proper nouns (zone, "\n'
+    '        "subzone, creature, NPC, item, spell, quest, "\n'
+    '        "and character names) in English exactly as "\n'
+    '        "written — never translate them. Any prior "\n'
+)
+NEW = (
+    '        "Use the official Spanish (esES) WoW names for "\n'
+    '        "zones, subzones, creatures, NPCs, items, spells "\n'
+    '        "and quests — Stormwind is Ventormenta, Eversong "\n'
+    '        "Woods is Bosque de la Canción Eterna. If you are "\n'
+    '        "not sure of the official Spanish name, keep the "\n'
+    '        "English one. NEVER translate player character, "\n'
+    '        "bot or guild names — write those exactly as "\n'
+    '        "given. Any prior "\n'
+)
+
+if OLD not in src:
+    sys.exit(
+        "chatter_shared.py: the proper-noun clause was not found. Upstream "
+        "changed get_language_rule() -- re-read it and update this block in "
+        "docker/llm-chatter-bridge.Dockerfile. Refusing to ship English names "
+        "silently."
+    )
+
+p.write_text(src.replace(OLD, NEW, 1), encoding="utf-8")
+print("chatter_shared.py: proper-noun rule set to Spanish (esES) names")
+PY
 
 # The complete upstream config. We never edit it -- llm-chatter-settings.conf
 # is layered on top at runtime, so upstream can add keys freely and we only
