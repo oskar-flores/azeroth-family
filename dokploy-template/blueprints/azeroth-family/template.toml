@@ -22,7 +22,7 @@ realm_name = "Azeroth Familiar"
 # registry, e.g. "192.168.8.103:5050/azeroth-family".
 image_prefix = "azeroth-family"
 image_tag = "latest"
-client_data_tag = "master"
+client_data_tag = "17.0.0-dev"
 auth_port = "3724"
 world_port = "8085"
 # REQUIRED: the Anthropic key the llm-chatter-bridge uses to talk in Spanish.

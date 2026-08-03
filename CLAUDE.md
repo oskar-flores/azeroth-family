@@ -9,9 +9,10 @@ Deployment and configuration for a private AzerothCore 3.3.5a (WotLK) realm with
 Tailscale. Read `README.md` for the reasoning behind most settings — but see the
 staleness note under "Invariants" before trusting its build section.
 
-No game code lives here. Seventeen tracked files: two shell scripts, a compose
-file, a Dockerfile, two Python scripts, and the config they act on. The C++ core
-is cloned on demand into `src/`, which is **gitignored and disposable**.
+No game code lives here: shell and Python scripts, a compose file, Dockerfiles
+for the llm-chatter bridge and admin-ui, the admin-ui app itself, and the config
+they all act on. The C++ core is cloned on demand into `src/`, which is
+**gitignored and disposable**.
 
 ## Architecture
 
@@ -199,9 +200,12 @@ after any config change. Shell changes are verified by running the script.
   `modules/mod-playerbots/data/sql/playerbots/base` is missing (that directory is
   the real cause of `Unknown database 'acore_playerbots'`); `ac-realm-config`
   creates the database as a backstop.
-- **`src/` is disposable.** `--update` does `git reset --hard`, so edits there are
-  destroyed. It has its own `CLAUDE.md`/`AGENTS.md` from upstream — those apply to
-  core C++ work, not to this repo.
+- **`src/` is disposable.** Any build or `--fetch-only` run calls `fetch_pinned`,
+  which does `git checkout -q --detach FETCH_HEAD` then `git clean -qfd` whenever
+  the checked-out HEAD doesn't already match the pin — so edits there are
+  destroyed, just not by `--update` (which now only reports, see above). It has
+  its own `CLAUDE.md`/`AGENTS.md` from upstream — those apply to core C++ work,
+  not to this repo.
 - **Core and module update together.** Mixing versions gives compile errors or
   runtime crashes.
 - **`BIND_ADDR` is the security boundary.** Pinning the published ports to the

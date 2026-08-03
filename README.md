@@ -289,7 +289,7 @@ boot for exactly this reason.
 **`Unknown database 'acore_playerbots'`.** Module SQL didn't import. The importer
 applies it automatically from `modules/<mod>/data/sql/`, and `ac-realm-config`
 creates the database itself as a backstop. If it persists, rebuild with
-`--update`.
+`./build-and-push.sh`.
 
 **Build dies partway through.** Almost always RAM. Close everything else, or
 lower the build parallelism.

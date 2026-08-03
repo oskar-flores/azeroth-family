@@ -9,6 +9,7 @@
 #   ./build-and-push.sh --push        also push to $REGISTRY (needs docker login)
 #   ./build-and-push.sh --update      report pinned refs vs upstream heads, then exit
 #   ./build-and-push.sh --fetch-only  fetch + checkout the pinned refs, then exit (no build)
+#   ./build-and-push.sh --no-latest   stop publishing the `latest` alias
 #
 # First build: 40-90 min and it wants ~8 GB RAM free. Later builds reuse ccache
 # and are much faster.
@@ -91,7 +92,7 @@ for arg in "$@"; do
     --update)     DO_UPDATE=1 ;;
     --fetch-only) DO_FETCH_ONLY=1 ;;
     --no-latest)  DO_LATEST=0 ;;
-    -h|--help) sed -n '2,20p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,15p' "$0"; exit 0 ;;
     *) echo "unknown option: $arg" >&2; exit 1 ;;
   esac
 done
