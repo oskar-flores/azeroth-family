@@ -34,7 +34,9 @@ MODULE_REPO="https://github.com/mod-playerbots/mod-playerbots.git"
 MODULE_BRANCH="master"
 MODULE_REF="ba46fcdecde3d0c6c2f244fcb3ea862430b6ae5b"
 
-TAG="${TAG:-latest}"
+# The sha is the identity; the date is a build stamp. Passing TAG= explicitly
+# reproduces any earlier build from the same pins.
+TAG="${TAG:-$(date +%Y.%m.%d)-${CORE_REF:0:7}}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SRC_DIR="${SRC_DIR:-$SCRIPT_DIR/src}"
 
@@ -59,20 +61,46 @@ EXTRA_MODULES=(
   "mod-transmog|https://github.com/azerothcore/mod-transmog.git|master|0d85cbc53d63ce2df8527169ce6ae47f5f6f6ba8"
 )
 
+# A container found running on the host should be traceable to its sources
+# without consulting the registry or this script's git history. Defined here,
+# right after EXTRA_MODULES, and assigned immediately below so PINS exists
+# before the --fetch-only exit further down uses it -- not down by the other
+# publish helpers, where it would be defined too late under set -u.
+pin_labels() {
+  local pins="core=${CORE_REF:0:7},playerbots=${MODULE_REF:0:7}"
+  if (( ${#EXTRA_MODULES[@]} )); then
+    local spec name url branch ref
+    for spec in "${EXTRA_MODULES[@]}"; do
+      IFS='|' read -r name url branch ref <<<"$spec"
+      pins="$pins,$name=${ref:0:7}"
+    done
+  fi
+  printf '%s' "$pins"
+}
+PINS="$(pin_labels)"
+
 CORE_DIR="$SRC_DIR/azerothcore-wotlk"
 
 DO_PUSH=0
 DO_UPDATE=0
 DO_FETCH_ONLY=0
+DO_LATEST=1
 for arg in "$@"; do
   case "$arg" in
     --push)       DO_PUSH=1 ;;
     --update)     DO_UPDATE=1 ;;
     --fetch-only) DO_FETCH_ONLY=1 ;;
+    --no-latest)  DO_LATEST=0 ;;
     -h|--help) sed -n '2,20p' "$0"; exit 0 ;;
     *) echo "unknown option: $arg" >&2; exit 1 ;;
   esac
 done
+
+# Every build also publishes `latest`. docker-compose.yml still defaults to
+# ${IMAGE_TAG:-latest} in six places and the Dokploy blueprint hard-codes
+# image_tag = "latest", so dropping it would break the running deploy the
+# moment this script is used. Pass --no-latest once IMAGE_TAG is set in
+# Dokploy and the alias is dead weight.
 
 log()  { printf '\n\033[1;36m==> %s\033[0m\n' "$*"; }
 warn() { printf '\033[1;33m !! %s\033[0m\n' "$*"; }
@@ -248,6 +276,8 @@ fi
 
 if (( DO_FETCH_ONLY )); then
   log "Fetched sources only (--fetch-only); nothing built"
+  echo "    tag that a build would produce: $TAG"
+  echo "    pins: $PINS"
   exit 0
 fi
 
@@ -287,11 +317,35 @@ verify_push() {
   echo "    verified in registry: $remote_digest"
 }
 
+push_and_verify() {
+  local image="$1"
+  log "Pushing $image"
+  docker push "$image"
+  verify_push "$image"
+}
+
+# Tag the alias regardless of --push so a local-daemon Dokploy (no registry at
+# all) also keeps working.
+publish() {
+  local image="$1"
+  (( DO_PUSH )) && push_and_verify "$image"
+  if (( DO_LATEST )); then
+    local alias="${image%:*}:latest"
+    docker tag "$image" "$alias"
+    (( DO_PUSH )) && push_and_verify "$alias"
+  fi
+  return 0
+}
+
 build_target() {
   local target="$1" name="$2"
   local image="azeroth-family/$name:$TAG"
   [[ -n "$REGISTRY" ]] && image="$REGISTRY/$name:$TAG"
 
+  # org.opencontainers.image.revision is deliberately the full CORE_REF, not a
+  # short SHA: the OCI spec's convention for source-control-revision is full
+  # length, and that is the one field where precision matters more than
+  # readability. Short SHAs are what family.pins is for.
   log "Building $image  (target: $target)"
   DOCKER_BUILDKIT=1 docker build \
     --file "$CORE_DIR/apps/docker/Dockerfile" \
@@ -302,14 +356,12 @@ build_target() {
     --build-arg USER_ID="${DOCKER_USER_ID:-1000}" \
     --build-arg GROUP_ID="${DOCKER_GROUP_ID:-1000}" \
     --build-arg TZ="${TZ:-Europe/Madrid}" \
+    --label "org.opencontainers.image.revision=$CORE_REF" \
+    --label "org.opencontainers.image.version=$TAG" \
+    --label "family.pins=$PINS" \
     "$CORE_DIR"
 
-  # REGISTRY is already validated in preflight, so this is just the push.
-  if (( DO_PUSH )); then
-    log "Pushing $image"
-    docker push "$image"
-    verify_push "$image"
-  fi
+  publish "$image"
   echo "$image"
 }
 
@@ -333,17 +385,18 @@ build_bridge() {
   [[ -d "$mod_dir" ]] || die "mod-llm-chatter is not cloned -- is it still in EXTRA_MODULES?"
   [[ -f "$dockerfile" ]] || die "missing $dockerfile"
 
+  # See build_target: revision stays the full CORE_REF on purpose, unlike the
+  # short SHAs in family.pins.
   log "Building $image"
   DOCKER_BUILDKIT=1 docker build \
     --file "$dockerfile" \
     --tag "$image" \
+    --label "org.opencontainers.image.revision=$CORE_REF" \
+    --label "org.opencontainers.image.version=$TAG" \
+    --label "family.pins=$PINS" \
     "$mod_dir"
 
-  if (( DO_PUSH )); then
-    log "Pushing $image"
-    docker push "$image"
-    verify_push "$image"
-  fi
+  publish "$image"
 }
 
 # ------------------------------------------------------------- admin ui
@@ -359,32 +412,45 @@ build_admin_ui() {
   [[ -d "$app_dir" ]] || die "missing $app_dir"
   [[ -f "$dockerfile" ]] || die "missing $dockerfile"
 
+  # See build_target: revision stays the full CORE_REF on purpose, unlike the
+  # short SHAs in family.pins.
   log "Building $image"
   DOCKER_BUILDKIT=1 docker build \
     --file "$dockerfile" \
     --tag "$image" \
+    --label "org.opencontainers.image.revision=$CORE_REF" \
+    --label "org.opencontainers.image.version=$TAG" \
+    --label "family.pins=$PINS" \
     "$app_dir"
 
-  if (( DO_PUSH )); then
-    log "Pushing $image"
-    docker push "$image"
-    verify_push "$image"
-  fi
+  publish "$image"
 }
 
 build_bridge
 build_admin_ui
 
 log "Done"
+prefix=$( [[ -n "$REGISTRY" ]] && echo "$REGISTRY" || echo "azeroth-family" )
 cat <<EOF
 
-Images built:
-  $( [[ -n "$REGISTRY" ]] && echo "$REGISTRY" || echo "azeroth-family" )/worldserver:$TAG
-  $( [[ -n "$REGISTRY" ]] && echo "$REGISTRY" || echo "azeroth-family" )/authserver:$TAG
-  $( [[ -n "$REGISTRY" ]] && echo "$REGISTRY" || echo "azeroth-family" )/db-import:$TAG
-  $( [[ -n "$REGISTRY" ]] && echo "$REGISTRY" || echo "azeroth-family" )/llm-chatter-bridge:$TAG
-  $( [[ -n "$REGISTRY" ]] && echo "$REGISTRY" || echo "azeroth-family" )/admin-ui:$TAG
+Images built ($TAG):
+  $prefix/worldserver:$TAG
+  $prefix/authserver:$TAG
+  $prefix/db-import:$TAG
+  $prefix/llm-chatter-bridge:$TAG
+  $prefix/admin-ui:$TAG
+$( (( DO_LATEST )) && echo "
+Also tagged :latest, so an existing deploy keeps working untouched." )
 
-Next: set IMAGE_PREFIX and IMAGE_TAG in Dokploy's environment to match, then deploy.
+Pins: $PINS
+
+Next: in Dokploy > Environment, set
+
+  IMAGE_PREFIX=$prefix
+  IMAGE_TAG=$TAG
+
+then redeploy. Leaving IMAGE_TAG unset keeps pulling :latest, which still
+works but is not rollback-able.
+
 Also set ANTHROPIC_API_KEY -- the bridge refuses to start without it.
 EOF
