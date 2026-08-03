@@ -86,3 +86,28 @@ the world down for the whole import — which needs the Docker API this app deli
 <p><a href="/admin">Back to the console</a></p>`,
   });
 }
+
+// The v1 create-account and set-GM-level forms, kept on the Overview under a
+// clearly-transitional label until the Accounts section plan relocates them.
+// Headings are verbatim from v1 so existing route assertions still match.
+export function legacyActions({ down = '' } = {}) {
+  return `
+<h2>Create an account</h2>
+<p class="muted">Moving to the Accounts tab in a later update.</p>
+<form action="/admin/account" method="post">
+  <label>Username <input name="username" pattern="[A-Za-z0-9]{3,16}" required></label>
+  <label>Password <input name="password" type="password" minlength="4" maxlength="16" required></label>
+  <button type="submit"${down}>Create</button>
+</form>
+<p class="muted">3-16 letters/digits. Password 4-16 ASCII characters — 3.3.5a truncates past 16.</p>
+
+<h2>Set GM level</h2>
+<form action="/admin/gmlevel" method="post">
+  <label>Username <input name="username" pattern="[A-Za-z0-9]{3,16}" required></label>
+  <label>Level <select name="level"><option>0</option><option>1</option><option>2</option><option>3</option></select></label>
+  <label>Type the username again to confirm <input name="confirm"></label>
+  <button type="submit"${down}>Apply</button>
+</form>
+<p class="muted">Kids stay at 0. GM commands can delete characters. Confirmation is required for any level above 0.</p>
+`;
+}

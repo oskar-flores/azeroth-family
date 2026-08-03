@@ -488,3 +488,27 @@ test('the restore page shows the command instead of doing the restore', async ()
   assert.match(res.body, /admin\.sh restore/);
   await fastify.close();
 });
+
+test('GET /admin renders the Overview dashboard inside the tab shell', async () => {
+  const { fastify } = await buildAdmin({
+    soap: stubSoap(async () => ({ ok: true, output: 'Connected players: 3. Connection peak: 5. rev. 3aff15d' })),
+  });
+  const cookie = await sessionFor(fastify, 'papa', 'goodpw');
+  const res = await fastify.inject({ method: 'GET', url: '/admin', headers: { cookie } });
+  assert.equal(res.statusCode, 200);
+  assert.match(res.body, /class="tabs"/);
+  assert.match(res.body, /Overview/);
+  assert.match(res.body, /Connected players/);
+  assert.match(res.body, /Quick actions/i);
+  await fastify.close();
+});
+
+test('the un-built section tabs resolve to a stub, not a 404', async () => {
+  const { fastify } = await buildAdmin();
+  const cookie = await sessionFor(fastify, 'papa', 'goodpw');
+  for (const url of ['/admin/mailbox', '/admin/maintenance']) {
+    const res = await fastify.inject({ method: 'GET', url, headers: { cookie } });
+    assert.equal(res.statusCode, 200, url);
+  }
+  await fastify.close();
+});

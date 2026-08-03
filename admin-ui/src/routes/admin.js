@@ -1,5 +1,8 @@
 import { createReadStream } from 'node:fs';
-import { adminPage, restorePage } from '../views/admin.js';
+import { restorePage } from '../views/admin.js';
+import { overviewPage } from '../views/overview.js';
+import { layout } from '../views/layout.js';
+import { notices as renderNotices } from '../views/components.js';
 import { requireAdmin, soapNotice } from './shared.js';
 
 const USERNAME = /^[A-Za-z0-9]{3,16}$/;
@@ -18,6 +21,8 @@ export const ADMIN_ROUTES = [
   { method: 'GET', url: '/admin/backup/status' },
   { method: 'GET', url: '/admin/backup/some_2026-01-01_0000.sql.gz' },
   { method: 'GET', url: '/admin/restore/some_2026-01-01_0000.sql.gz' },
+  { method: 'GET', url: '/admin/mailbox' },
+  { method: 'GET', url: '/admin/maintenance' },
 ];
 
 export default async function adminRoutes(fastify, { db, auth, soap, backups, audit }) {
@@ -30,13 +35,14 @@ export default async function adminRoutes(fastify, { db, auth, soap, backups, au
       realmUp = true;
     } catch { /* the console must render with the world down */ }
 
-    const [realm, list] = await Promise.all([
+    const [realm, online] = await Promise.all([
       db.getRealm().catch(() => null),
-      backups.list().catch(() => []),
+      db.listOnlineCharacters().catch(() => []),
     ]);
 
-    return reply.code(code).type('text/html; charset=utf-8').send(adminPage({
-      user, realm, realmUp, serverInfo, backups: list, backupStatus: backups.status(), notices,
+    return reply.code(code).type('text/html; charset=utf-8').send(layout({
+      title: 'Realm admin', lang: 'en', user, section: 'overview',
+      body: overviewPage({ user, realm, realmUp, serverInfo, online, backupStatus: backups.status(), noticeList: notices }),
     }));
   }
 
@@ -176,5 +182,23 @@ export default async function adminRoutes(fastify, { db, auth, soap, backups, au
     if (!user) return reply;
     // Deliberately a page of instructions, not an action. See the design doc.
     return reply.type('text/html; charset=utf-8').send(restorePage({ name: request.params.name }));
+  });
+
+  fastify.get('/admin/mailbox', async (request, reply) => {
+    const user = await requireAdmin(request, reply, auth);
+    if (!user) return reply;
+    return reply.type('text/html; charset=utf-8').send(layout({
+      title: 'Mailbox', lang: 'en', user, section: 'mailbox',
+      body: `${renderNotices([])}<p class="muted">Mailbox is built in a later update.</p>`,
+    }));
+  });
+
+  fastify.get('/admin/maintenance', async (request, reply) => {
+    const user = await requireAdmin(request, reply, auth);
+    if (!user) return reply;
+    return reply.type('text/html; charset=utf-8').send(layout({
+      title: 'Maintenance', lang: 'en', user, section: 'maintenance',
+      body: `${renderNotices([])}<p class="muted">Maintenance is built in a later update.</p>`,
+    }));
   });
 }
