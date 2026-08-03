@@ -1,6 +1,6 @@
 import { createReadStream } from 'node:fs';
-import { parseCookies, SESSION_COOKIE } from '../auth.js';
 import { adminPage, restorePage } from '../views.js';
+import { requireAdmin, soapNotice } from './shared.js';
 
 const USERNAME = /^[A-Za-z0-9]{3,16}$/;
 // 3.3.5a truncates a password past 16 characters, which would create an account
@@ -20,32 +20,7 @@ export const ADMIN_ROUTES = [
   { method: 'GET', url: '/admin/restore/some_2026-01-01_0000.sql.gz' },
 ];
 
-// Maps the SOAP error taxonomy onto messages an operator can act on. A Fault is
-// the command's own output and belongs in front of the user unchanged.
-function soapNotice(err) {
-  switch (err.kind) {
-    case 'fault':      return { kind: 'error', text: err.message };
-    case 'auth':       return { kind: 'error', text: 'The worldserver rejected the SOAP service account. Check SOAP_USER / SOAP_PASS in Dokploy.' };
-    case 'forbidden':  return { kind: 'error', text: 'The SOAP service account is below GM level 3. Re-run: ./scripts/admin.sh gm $SOAP_USER 3' };
-    case 'timeout':    return { kind: 'error', text: 'The worldserver did not answer in time. It may be starting up or overloaded.' };
-    case 'unreachable':return { kind: 'error', text: 'Cannot reach the worldserver on SOAP. Is ac-worldserver running?' };
-    default:           return { kind: 'error', text: `Unexpected response from the worldserver: ${err.message}` };
-  }
-}
-
 export default async function adminRoutes(fastify, { db, auth, soap, backups, audit }) {
-  // Roles are re-read from the database here, on every request, so a session
-  // minted before a demotion stops working immediately.
-  async function requireAdmin(request, reply) {
-    const token = parseCookies(request.headers.cookie)[SESSION_COOKIE];
-    const user = await auth.requireRole(token, 3);
-    if (!user) {
-      reply.code(403).type('text/html; charset=utf-8')
-        .send('<p>This page needs GM level 3. <a href="/">Back</a></p>');
-      return null;
-    }
-    return user;
-  }
 
   async function render(reply, user, notices = [], code = 200) {
     let realmUp = false;
@@ -66,13 +41,13 @@ export default async function adminRoutes(fastify, { db, auth, soap, backups, au
   }
 
   fastify.get('/admin', async (request, reply) => {
-    const user = await requireAdmin(request, reply);
+    const user = await requireAdmin(request, reply, auth);
     if (!user) return reply;
     return render(reply, user);
   });
 
   fastify.post('/admin/account', async (request, reply) => {
-    const user = await requireAdmin(request, reply);
+    const user = await requireAdmin(request, reply, auth);
     if (!user) return reply;
 
     const username = String(request.body?.username ?? '').trim();
@@ -97,7 +72,7 @@ export default async function adminRoutes(fastify, { db, auth, soap, backups, au
   });
 
   fastify.post('/admin/gmlevel', async (request, reply) => {
-    const user = await requireAdmin(request, reply);
+    const user = await requireAdmin(request, reply, auth);
     if (!user) return reply;
 
     const username = String(request.body?.username ?? '').trim();
@@ -147,7 +122,7 @@ export default async function adminRoutes(fastify, { db, auth, soap, backups, au
   });
 
   fastify.post('/admin/restart', async (request, reply) => {
-    const user = await requireAdmin(request, reply);
+    const user = await requireAdmin(request, reply, auth);
     if (!user) return reply;
     try {
       // A countdown, not a hard kill: `docker restart` would drop logged-in
@@ -162,7 +137,7 @@ export default async function adminRoutes(fastify, { db, auth, soap, backups, au
   });
 
   fastify.post('/admin/backup', async (request, reply) => {
-    const user = await requireAdmin(request, reply);
+    const user = await requireAdmin(request, reply, auth);
     if (!user) return reply;
     try {
       backups.start();
@@ -175,13 +150,13 @@ export default async function adminRoutes(fastify, { db, auth, soap, backups, au
   });
 
   fastify.get('/admin/backup/status', async (request, reply) => {
-    const user = await requireAdmin(request, reply);
+    const user = await requireAdmin(request, reply, auth);
     if (!user) return reply;
     return reply.send(backups.status());
   });
 
   fastify.get('/admin/backup/:name', async (request, reply) => {
-    const user = await requireAdmin(request, reply);
+    const user = await requireAdmin(request, reply, auth);
     if (!user) return reply;
     let file;
     try {
@@ -197,7 +172,7 @@ export default async function adminRoutes(fastify, { db, auth, soap, backups, au
   });
 
   fastify.get('/admin/restore/:name', async (request, reply) => {
-    const user = await requireAdmin(request, reply);
+    const user = await requireAdmin(request, reply, auth);
     if (!user) return reply;
     // Deliberately a page of instructions, not an action. See the design doc.
     return reply.type('text/html; charset=utf-8').send(restorePage({ name: request.params.name }));
