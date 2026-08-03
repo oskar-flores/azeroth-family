@@ -4,6 +4,7 @@ import { className, raceName } from '../src/lookups.js';
 import { escapeHtml, layout } from '../src/views/layout.js';
 import { loginPage, familyPage } from '../src/views/family.js';
 import { adminPage, restorePage } from '../src/views/admin.js';
+import { parseServerInfo, statusCard } from '../src/views/components.js';
 
 test('class and race IDs map to the names the esES client shows', () => {
   assert.equal(className(1), 'Guerrero');
@@ -140,4 +141,44 @@ test('the active tab follows the section argument', () => {
   const html = layout({ title: 'x', lang: 'en', user: { username: 'PAPA', role: 3 }, section: 'accounts', body: '' });
   assert.match(html, /class="tab active" href="\/admin\/accounts"/);
   assert.ok(!/class="tab active"[^]*>Overview</.test(html));
+});
+
+const SAMPLE = `Default DBC locale: enUS.
+Using World DB: 2026-08-03.
+Connected players: 3. Characters in world: 12.
+Connection peak: 5.
+Server Uptime: 4h 12m 3s
+Update time diff: 7ms. Last 100 diffs summary:
+AzerothCore rev. 3aff15d 3.3.5a (Unix, 2026-08-03) (Playerbot)`;
+
+test('parseServerInfo extracts the reliable fields from a real sample', () => {
+  const p = parseServerInfo(SAMPLE);
+  assert.equal(p.online, 3);
+  assert.equal(p.peak, 5);
+  assert.equal(p.build, '3aff15d');
+  assert.equal(p.updateMs, 7);
+  assert.match(p.uptime, /4h 12m/);
+});
+
+test('parseServerInfo returns null on totally unrecognised output', () => {
+  assert.equal(parseServerInfo('hello world'), null);
+  assert.equal(parseServerInfo(''), null);
+});
+
+test('statusCard shows parsed fields and a raw-output expander when up', () => {
+  const html = statusCard({ serverInfo: SAMPLE, realmUp: true });
+  assert.match(html, /Connected players/);
+  assert.match(html, /<details>/);
+  assert.match(html, /3aff15d/);
+});
+
+test('statusCard falls back to raw pre when the output is unparseable', () => {
+  const html = statusCard({ serverInfo: 'something odd', realmUp: true });
+  assert.match(html, /<pre>/);
+  assert.match(html, /something odd/);
+});
+
+test('statusCard says the worldserver is down when realmUp is false', () => {
+  const html = statusCard({ serverInfo: null, realmUp: false });
+  assert.match(html, /not answering/i);
 });

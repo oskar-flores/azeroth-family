@@ -40,6 +40,11 @@ pre { overflow-x: auto; padding: .75rem; border: 1px solid var(--line); border-r
 nav.tabs { display:flex; flex-wrap:wrap; gap:0; border-bottom:1px solid var(--line); margin:0 0 1rem; }
 nav.tabs a { padding:.5rem .8rem; color:var(--muted); text-decoration:none; font-size:.9rem; border-bottom:2px solid transparent; }
 nav.tabs a.active { color:var(--accent); border-bottom-color:var(--accent); font-weight:600; }
+.card { border:1px solid var(--line); border-radius:.4rem; padding:.6rem .8rem; margin:0 0 .75rem; }
+.card h2 { margin:0 0 .4rem; font-size:1rem; border:0; padding:0; display:inline; }
+.kv { display:flex; justify-content:space-between; font-size:.9rem; padding:.1rem 0; }
+.kv span:first-child { color:var(--muted); }
+details summary { cursor:pointer; font-size:.85rem; }
 `;
 
 const TAB_DEFS = [
