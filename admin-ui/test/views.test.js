@@ -1,7 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { className, raceName } from '../src/lookups.js';
-import { escapeHtml, loginPage, familyPage, adminPage, restorePage } from '../src/views.js';
+import { escapeHtml, layout } from '../src/views/layout.js';
+import { loginPage, familyPage } from '../src/views/family.js';
+import { adminPage, restorePage } from '../src/views/admin.js';
 
 test('class and race IDs map to the names the esES client shows', () => {
   assert.equal(className(1), 'Guerrero');

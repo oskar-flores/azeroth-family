@@ -1,5 +1,5 @@
 import { createReadStream } from 'node:fs';
-import { adminPage, restorePage } from '../views.js';
+import { adminPage, restorePage } from '../views/admin.js';
 import { requireAdmin, soapNotice } from './shared.js';
 
 const USERNAME = /^[A-Za-z0-9]{3,16}$/;

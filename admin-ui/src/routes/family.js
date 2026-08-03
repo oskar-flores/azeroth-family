@@ -1,5 +1,5 @@
 import { parseCookies, serializeCookie, SESSION_COOKIE } from '../auth.js';
-import { loginPage, familyPage } from '../views.js';
+import { loginPage, familyPage } from '../views/family.js';
 
 // SOAP `server info` answering at all is the liveness signal: it needs the world
 // thread to run the command, so a reply means the realm is genuinely up.
