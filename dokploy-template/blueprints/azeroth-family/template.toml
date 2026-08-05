@@ -139,7 +139,7 @@ content = '''
 
 LLMChatter.Enable   = 1
 LLMChatter.Provider = openrouter
-LLMChatter.Model    = deepseek/deepseek-v4-flash
+LLMChatter.Model    = qwen/qwen3-235b-a22b-2507
 
 
 # -----------------------------------------------------------------------------
