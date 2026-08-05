@@ -506,7 +506,7 @@ test('GET /admin renders the Overview dashboard inside the tab shell', async () 
 test('the un-built section tabs resolve to a stub, not a 404', async () => {
   const { fastify } = await buildAdmin();
   const cookie = await sessionFor(fastify, 'papa', 'goodpw');
-  for (const url of ['/admin/mailbox', '/admin/maintenance']) {
+  for (const url of ['/admin/accounts', '/admin/characters', '/admin/mailbox', '/admin/maintenance']) {
     const res = await fastify.inject({ method: 'GET', url, headers: { cookie } });
     assert.equal(res.statusCode, 200, url);
   }
