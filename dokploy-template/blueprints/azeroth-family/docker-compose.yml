@@ -13,6 +13,12 @@ services:
   # ---------------------------------------------------------------- database
   ac-database:
     image: mysql:8.4
+    # NOTE: 8.4 is a floating minor -- unlike every other pull_policy here this
+    # one can land a new MySQL PATCH release, which runs data-dir upgrade steps
+    # against the kids' characters. Pin the patch (mysql:8.4.x) if you would
+    # rather take those deliberately. It only ever applies on an explicit
+    # redeploy; `restart: unless-stopped` reuses the running image on reboot.
+    pull_policy: always
     container_name: ac-database
     restart: unless-stopped
     networks: [ac-network]
@@ -40,6 +46,8 @@ services:
   # it ships enUS dbc files, which is exactly what playerbots requires.
   ac-client-data-init:
     image: acore/ac-wotlk-client-data:${CLIENT_DATA_TAG:-master}
+    # Default tag is `master`, which floats by definition.
+    pull_policy: always
     container_name: ac-client-data-init
     networks: [ac-network]
     volumes:
@@ -66,6 +74,9 @@ services:
   # after a core update.
   ac-module-sql-init:
     image: ${IMAGE_PREFIX:-azeroth-family}/db-import:${IMAGE_TAG:-latest}
+    # Doubly important here: this service exists to stop the stack serving
+    # last month's module SQL, which a cached image would reintroduce.
+    pull_policy: always
     container_name: ac-module-sql-init
     networks: [ac-network]
     # cp -a as root preserves the acore:acore ownership the worldserver reads as.
@@ -78,6 +89,7 @@ services:
   # -------------------------------------------------- db import (runs once)
   ac-db-import:
     image: ${IMAGE_PREFIX:-azeroth-family}/db-import:${IMAGE_TAG:-latest}
+    pull_policy: always
     container_name: ac-db-import
     networks: [ac-network]
     environment:
@@ -102,6 +114,7 @@ services:
   #     the character screen forever". This is THE classic private-server bug.
   ac-realm-config:
     image: mysql:8.4
+    pull_policy: always
     container_name: ac-realm-config
     networks: [ac-network]
     environment:
@@ -133,6 +146,7 @@ services:
   # realmlist.wtf points at.
   ac-authserver:
     image: ${IMAGE_PREFIX:-azeroth-family}/authserver:${IMAGE_TAG:-latest}
+    pull_policy: always
     container_name: ac-authserver
     restart: unless-stopped
     tty: true
@@ -159,6 +173,10 @@ services:
   # -------------------------------------------------------------- worldserver
   ac-worldserver:
     image: ${IMAGE_PREFIX:-azeroth-family}/worldserver:${IMAGE_TAG:-latest}
+    # Core and modules compile together, so this must not lag authserver or
+    # db-import -- a cached worldserver against freshly imported module SQL is
+    # the version mismatch CLAUDE.md warns about.
+    pull_policy: always
     container_name: ac-worldserver
     restart: unless-stopped
     # Needed so you can `docker attach ac-worldserver` and use the GM console
@@ -289,6 +307,18 @@ services:
   # container; the images do not change.
   ac-llm-chatter-bridge:
     image: ${IMAGE_PREFIX:-azeroth-family}/llm-chatter-bridge:${IMAGE_TAG:-latest}
+    # Required because llm-chatter-settings.conf below is a BIND MOUNT while
+    # the entrypoint that reads it is baked into the image. Edit the conf and
+    # it goes live on the next restart; the image does not, so without this
+    # the config can outrun the code that understands it. That is not
+    # hypothetical: setting Provider = openrouter against an image whose
+    # entrypoint only knew ANTHROPIC_API_KEY left OpenRouter.ApiKey at
+    # upstream's `sk-or-v1-xxxxx` placeholder -- every call 401'd, the health
+    # check failed, and llm_chatter_bridge.py sys.exit(1)'d into a restart
+    # loop. `latest` is a moving tag, so a redeploy that reuses the cached
+    # copy is silently a downgrade. Cheap: this is a manifest check, and only
+    # changed layers download.
+    pull_policy: always
     container_name: ac-llm-chatter-bridge
     restart: unless-stopped
     networks: [ac-network]
@@ -330,6 +360,7 @@ services:
   # mechanism that already contains 3724 and 8085.
   ac-admin-ui:
     image: ${IMAGE_PREFIX:-azeroth-family}/admin-ui:${IMAGE_TAG:-latest}
+    pull_policy: always
     container_name: ac-admin-ui
     restart: unless-stopped
     networks: [ac-network]
