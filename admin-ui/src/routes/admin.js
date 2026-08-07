@@ -21,6 +21,8 @@ export const ADMIN_ROUTES = [
   { method: 'GET', url: '/admin/backup/status' },
   { method: 'GET', url: '/admin/backup/some_2026-01-01_0000.sql.gz' },
   { method: 'GET', url: '/admin/restore/some_2026-01-01_0000.sql.gz' },
+  { method: 'GET', url: '/admin/accounts' },
+  { method: 'GET', url: '/admin/characters' },
   { method: 'GET', url: '/admin/mailbox' },
   { method: 'GET', url: '/admin/maintenance' },
   { method: 'GET', url: '/admin/status.json' },
@@ -196,6 +198,24 @@ export default async function adminRoutes(fastify, { db, auth, soap, backups, au
     if (!user) return reply;
     // Deliberately a page of instructions, not an action. See the design doc.
     return reply.type('text/html; charset=utf-8').send(restorePage({ name: request.params.name }));
+  });
+
+  fastify.get('/admin/accounts', async (request, reply) => {
+    const user = await requireAdmin(request, reply, auth);
+    if (!user) return reply;
+    return reply.type('text/html; charset=utf-8').send(layout({
+      title: 'Accounts', lang: 'en', user, section: 'accounts',
+      body: `${renderNotices([])}<p class="muted">Accounts is built in a later update.</p>`,
+    }));
+  });
+
+  fastify.get('/admin/characters', async (request, reply) => {
+    const user = await requireAdmin(request, reply, auth);
+    if (!user) return reply;
+    return reply.type('text/html; charset=utf-8').send(layout({
+      title: 'Characters', lang: 'en', user, section: 'characters',
+      body: `${renderNotices([])}<p class="muted">Characters is built in a later update.</p>`,
+    }));
   });
 
   fastify.get('/admin/mailbox', async (request, reply) => {
