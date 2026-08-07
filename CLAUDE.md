@@ -302,19 +302,32 @@ after any config change. Shell changes are verified by running the script.
   (`num_ctx`) and Google (`thinking_config`); the four `LLMChatter.OpenRouter.*`
   keys it defines are ApiKey, BaseUrl, HttpReferer and Title. The second
   heredoc patch in `docker/llm-chatter-bridge.Dockerfile` adds
-  `_apply_openrouter_options()` to `chatter_llm.py` and calls it from **both**
-  `call_llm` and `quick_llm_analyze`. It matters on the hybrid DeepSeek slugs
-  (V3.2, V4), where one model ID serves both modes and reasoning is billed as
-  output tokens — a bot says two sentences in character, so a thinking budget
-  is pure cost plus a risk of `<think>` text leaking into the JSON the bridge
-  parses. Three `sys.exit` guards fail the build if upstream moves the anchor,
-  changes the dispatch, or adds its own OpenRouter reasoning support — in that
-  last case delete the block and use the upstream key rather than patching
-  around it. It is live against the pinned model (OpenRouter lists `reasoning`
-  in that slug's supported parameters) and is silently dropped on a slug that
-  can't reason, so it is safe to leave set across model changes either way.
-  Verify with:
+  `_apply_openrouter_options()` and wires it into **three** call sites across
+  **two** files — `call_llm` and `quick_llm_analyze` in `chatter_llm.py`, plus
+  `_probe_openai_compatible` in `chatter_healthcheck.py`. It matters on the
+  hybrid DeepSeek slugs (V3.2, V4), where one model ID serves both modes and
+  reasoning is billed as output tokens — a bot says two sentences in
+  character, so a thinking budget is pure cost plus a risk of `<think>` text
+  leaking into the JSON the bridge parses. Five `sys.exit` guards fail the
+  build if upstream moves any anchor, changes either dispatch, or adds its own
+  OpenRouter reasoning support — in that last case delete the block and use
+  the upstream key rather than patching around it. It is live against the
+  pinned model (OpenRouter lists `reasoning` in that slug's supported
+  parameters) and is silently dropped on a slug that can't reason, so it is
+  safe to leave set across model changes either way. Verify with:
   `docker run --rm --entrypoint python <bridge-image> -c "import chatter_llm as c; print(c._openrouter_reasoning({'LLMChatter.OpenRouter.Reasoning':'off'}))"`
+- **The health check's startup probe is a separate LLM call site, and it gates
+  the whole bridge.** `_probe_openai_compatible` (`chatter_healthcheck.py:498`)
+  builds its own request with `max_tokens=5` instead of going through
+  `call_llm`, and `llm_chatter_bridge.py:1870` calls `sys.exit(1)` when the
+  probe fails. On a reasoning model with no `reasoning` parameter the model
+  spends all 5 tokens thinking, content comes back empty, and the bridge
+  refuses to boot — reported as `[FAIL] LLM connectivity (live test) … the
+  endpoint is reachable but produced no text`. That message blames the model
+  and the `max_tokens`; the actual cause is a missing request parameter, so
+  patching `chatter_llm.py` alone does not fix it. If that line ever appears
+  again on a hybrid slug, check the probe payload before touching the model —
+  swapping to another hybrid reproduces it exactly.
 - **`Ctrl-C` on the worldserver console stops the realm.** Detach with `Ctrl-P`
   `Ctrl-Q`; `admin.sh` sets `--detach-keys` for this reason.
 - Bot load is tuned by `AiPlayerbot.MinRandomBots` / `MaxRandomBots` (currently

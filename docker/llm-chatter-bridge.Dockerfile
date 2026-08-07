@@ -99,14 +99,21 @@ PY
 # harmless on a non-reasoning slug -- it simply starts applying when the model
 # changes to one that reasons.
 #
+# TWO files need patching, not one. chatter_llm.py carries the real chat
+# traffic; chatter_healthcheck.py has an independent startup probe that builds
+# its own request and gates the whole bridge -- see the note further down.
+#
 # Same heredoc-patch mechanism, and for the same reason, as the block above:
 # the build context is the MODULE directory, so nothing in this repo's docker/
-# is reachable by COPY. All three sys.exit guards are load-bearing -- a silent
-# no-op here ships a bridge that quietly pays for reasoning nobody asked for.
+# is reachable by COPY. All five sys.exit guards are load-bearing -- a silent
+# no-op here ships a bridge that quietly pays for reasoning nobody asked for,
+# or that refuses to boot at all.
 RUN python3 <<'PY'
 import pathlib, sys
 
-p = pathlib.Path("/app/chatter_llm.py")
+APP = pathlib.Path("/app")
+
+p = APP / "chatter_llm.py"
 src = p.read_text(encoding="utf-8")
 
 HELPER = '''def _openrouter_reasoning(config):
@@ -180,9 +187,74 @@ if found != 2:
         "docker/llm-chatter-bridge.Dockerfile." % found
     )
 src = src.replace(OLD, NEW)
-
 p.write_text(src, encoding="utf-8")
 print("chatter_llm.py: OpenRouter reasoning toggle wired into 2 call sites")
+
+# The startup probe builds its OWN request rather than going through call_llm,
+# so it does not inherit the toggle above. On a reasoning model that is fatal
+# rather than cosmetic: the probe asks for 5 tokens, the model spends all 5
+# thinking, content comes back empty, has_critical_failure() fires and
+# llm_chatter_bridge.py sys.exit(1)s. The bridge never starts, no bot ever
+# chats, and the report blames the model -- "reachable but produced no text"
+# -- rather than the missing request parameter. Patching chatter_llm.py alone
+# is NOT enough; this was found the hard way.
+h = APP / "chatter_healthcheck.py"
+hsrc = h.read_text(encoding="utf-8")
+
+OLD_PROBE = '''def _probe_openai_compatible(client, model):
+    """Make a minimal OpenAI-compatible call; text or raises."""
+    resp = client.chat.completions.create(
+        model=model,
+        max_tokens=5,
+        messages=[{
+            'role': 'user',
+            'content': 'Reply with the single word: OK',
+        }],
+    )
+'''
+NEW_PROBE = '''def _probe_openai_compatible(
+    client, model, config=None, provider=None
+):
+    """Make a minimal OpenAI-compatible call; text or raises."""
+    probe_kwargs = {
+        'model': model,
+        'max_tokens': 5,
+        'messages': [{
+            'role': 'user',
+            'content': 'Reply with the single word: OK',
+        }],
+    }
+    if provider == 'openrouter' and config is not None:
+        from chatter_llm import _apply_openrouter_options
+        _apply_openrouter_options(probe_kwargs, config)
+    resp = client.chat.completions.create(**probe_kwargs)
+'''
+if OLD_PROBE not in hsrc:
+    sys.exit(
+        "chatter_healthcheck.py: _probe_openai_compatible() does not match "
+        "the expected body. Upstream changed the startup probe -- re-read it "
+        "and update this block in docker/llm-chatter-bridge.Dockerfile. "
+        "Refusing to ship a bridge whose health check can false-fail on a "
+        "reasoning model and sys.exit(1) before any bot speaks."
+    )
+hsrc = hsrc.replace(OLD_PROBE, NEW_PROBE, 1)
+
+OLD_CALL = "            text = _probe_openai_compatible(client, model)\n"
+NEW_CALL = (
+    "            text = _probe_openai_compatible(\n"
+    "                client, model, config, provider\n"
+    "            )\n"
+)
+if hsrc.count(OLD_CALL) != 1:
+    sys.exit(
+        "chatter_healthcheck.py: expected exactly 1 probe call site, found "
+        "%d. Upstream changed the health check -- re-read it and update this "
+        "block in docker/llm-chatter-bridge.Dockerfile." % hsrc.count(OLD_CALL)
+    )
+hsrc = hsrc.replace(OLD_CALL, NEW_CALL, 1)
+
+h.write_text(hsrc, encoding="utf-8")
+print("chatter_healthcheck.py: startup probe now sends the reasoning option")
 PY
 
 # The complete upstream config. We never edit it -- llm-chatter-settings.conf
