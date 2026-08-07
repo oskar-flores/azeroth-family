@@ -213,6 +213,18 @@ services:
   # container; the images do not change.
   ac-llm-chatter-bridge:
     image: ${IMAGE_PREFIX:-azeroth-family}/llm-chatter-bridge:${IMAGE_TAG:-latest}
+    # Required because llm-chatter-settings.conf below is a BIND MOUNT while
+    # the entrypoint that reads it is baked into the image. Edit the conf and
+    # it goes live on the next restart; the image does not, so without this
+    # the config can outrun the code that understands it. That is not
+    # hypothetical: setting Provider = openrouter against an image whose
+    # entrypoint only knew ANTHROPIC_API_KEY left OpenRouter.ApiKey at
+    # upstream's `sk-or-v1-xxxxx` placeholder -- every call 401'd, the health
+    # check failed, and llm_chatter_bridge.py sys.exit(1)'d into a restart
+    # loop. `latest` is a moving tag, so a redeploy that reuses the cached
+    # copy is silently a downgrade. Cheap: this is a manifest check, and only
+    # changed layers download.
+    pull_policy: always
     container_name: ac-llm-chatter-bridge
     restart: unless-stopped
     networks: [ac-network]
