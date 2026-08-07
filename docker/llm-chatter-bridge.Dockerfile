@@ -76,6 +76,115 @@ p.write_text(src.replace(OLD, NEW, 1), encoding="utf-8")
 print("chatter_shared.py: proper-noun rule set to Spanish (esES) names")
 PY
 
+# --- OpenRouter reasoning toggle ---------------------------------------------
+# OpenRouter accepts a `reasoning` object on the OpenAI-compatible endpoint --
+# {"enabled": false} turns thinking off entirely, {"effort": "..."} dials it.
+# Upstream never sends it: chatter_llm.py builds the OpenRouter payload from
+# exactly model/max_tokens/temperature/messages, and wires extra_body only for
+# Ollama (num_ctx) and Google (thinking_config). The four LLMChatter.OpenRouter.*
+# keys upstream defines are ApiKey, BaseUrl, HttpReferer and Title -- nothing
+# for reasoning, and there is no generic passthrough.
+#
+# That matters for the hybrid DeepSeek slugs (V3.2, V4), where one model ID
+# serves both modes and reasoning is billed as output tokens. Bot chatter is
+# one or two sentences of in-character dialogue; paying for a thinking budget
+# on it is pure cost, and leaked <think> text is a hazard for the structured
+# output the bridge parses (see chatter_text.py:58).
+#
+# Adding a CONFIG KEY rather than hard-coding {"enabled": false} is the point:
+# it keeps "changing the model is a config edit plus a bridge restart" true. A
+# hard-coded value would mean a rebuild every time that judgement changed.
+#
+# OpenRouter silently drops parameters a model does not support, so the key is
+# harmless on a non-reasoning slug -- it simply starts applying when the model
+# changes to one that reasons.
+#
+# Same heredoc-patch mechanism, and for the same reason, as the block above:
+# the build context is the MODULE directory, so nothing in this repo's docker/
+# is reachable by COPY. All three sys.exit guards are load-bearing -- a silent
+# no-op here ships a bridge that quietly pays for reasoning nobody asked for.
+RUN python3 <<'PY'
+import pathlib, sys
+
+p = pathlib.Path("/app/chatter_llm.py")
+src = p.read_text(encoding="utf-8")
+
+HELPER = '''def _openrouter_reasoning(config):
+    """Return the OpenRouter `reasoning` request body, or None.
+
+    Empty (the default) omits the parameter entirely, which
+    leaves each model on its own default. Off-words give
+    {'enabled': False}; effort levels pass through as
+    {'effort': <level>}.
+    """
+    raw = str(config.get(
+        'LLMChatter.OpenRouter.Reasoning', ''
+    )).strip().lower()
+    if not raw:
+        return None
+    if raw in ('off', '0', 'false', 'no', 'none', 'disabled'):
+        return {'enabled': False}
+    if raw in ('on', '1', 'true', 'yes', 'enabled'):
+        return {'enabled': True}
+    if raw in ('minimal', 'low', 'medium', 'high', 'xhigh', 'max'):
+        return {'effort': raw}
+    logger.warning(
+        "Invalid LLMChatter.OpenRouter.Reasoning=%r -- "
+        "omitting the parameter", raw
+    )
+    return None
+
+
+def _apply_openrouter_options(kwargs, config):
+    """Attach OpenRouter-specific request body options."""
+    reasoning = _openrouter_reasoning(config)
+    if reasoning is not None:
+        extra = kwargs.setdefault('extra_body', {})
+        extra['reasoning'] = reasoning
+
+
+'''
+
+ANCHOR = "def _effective_max_tokens(provider, config, max_tokens):"
+if ANCHOR not in src:
+    sys.exit(
+        "chatter_llm.py: _effective_max_tokens() was not found. Upstream "
+        "restructured the call layer -- re-read it and update this block in "
+        "docker/llm-chatter-bridge.Dockerfile. Refusing to ship a bridge "
+        "whose reasoning toggle is silently absent."
+    )
+if "_apply_openrouter_options" in src:
+    sys.exit(
+        "chatter_llm.py: _apply_openrouter_options() already exists. "
+        "Upstream added OpenRouter reasoning support -- drop this block from "
+        "docker/llm-chatter-bridge.Dockerfile and use the upstream key."
+    )
+src = src.replace(ANCHOR, HELPER + ANCHOR, 1)
+
+OLD = (
+    "            if provider == 'google':\n"
+    "                _apply_google_options(kwargs, config)\n"
+)
+NEW = (
+    "            if provider == 'google':\n"
+    "                _apply_google_options(kwargs, config)\n"
+    "            elif provider == 'openrouter':\n"
+    "                _apply_openrouter_options(kwargs, config)\n"
+)
+found = src.count(OLD)
+if found != 2:
+    sys.exit(
+        "chatter_llm.py: expected 2 google-options call sites (call_llm and "
+        "quick_llm_analyze), found %d. Upstream changed the provider "
+        "dispatch -- re-read it and update this block in "
+        "docker/llm-chatter-bridge.Dockerfile." % found
+    )
+src = src.replace(OLD, NEW)
+
+p.write_text(src, encoding="utf-8")
+print("chatter_llm.py: OpenRouter reasoning toggle wired into 2 call sites")
+PY
+
 # The complete upstream config. We never edit it -- llm-chatter-settings.conf
 # is layered on top at runtime, so upstream can add keys freely and we only
 # have to state our own deltas.

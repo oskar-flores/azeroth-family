@@ -289,12 +289,32 @@ after any config change. Shell changes are verified by running the script.
   upstream warns smaller models produce malformed JSON, and the bridge needs
   structured output, so a weak model fails outright rather than merely
   sounding worse.
-- **The OpenRouter model slug floats, unlike everything else here.**
-  `deepseek/deepseek-v4-flash` resolves to a dated build that DeepSeek can
-  repoint — the property this repo deliberately refuses for the core and every
-  module. It's tolerable only because a bad model surfaces in the request log
-  and reverting is one line. `deepseek/deepseek-v4-flash-0731` is the frozen
-  snapshot to pin when ruling the model out as a cause.
+- **The OpenRouter model is pinned like everything else here.**
+  `deepseek/deepseek-v4-flash-0731` is a frozen dated snapshot. The bare
+  `deepseek/deepseek-v4-flash` alias floats — DeepSeek can repoint it silently,
+  the property this repo refuses for the core and every module — so don't
+  "simplify" the slug by dropping the date. The pin costs ~2% more per token
+  ($0.09/$0.18 per M in/out vs $0.0882/$0.1764) and is one line plus a bridge
+  restart to change, with no rebuild.
+- **`LLMChatter.OpenRouter.Reasoning` is ours, not upstream's — grepping the
+  module for it finds nothing.** Upstream sends OpenRouter exactly
+  model/max_tokens/temperature/messages and wires `extra_body` only for Ollama
+  (`num_ctx`) and Google (`thinking_config`); the four `LLMChatter.OpenRouter.*`
+  keys it defines are ApiKey, BaseUrl, HttpReferer and Title. The second
+  heredoc patch in `docker/llm-chatter-bridge.Dockerfile` adds
+  `_apply_openrouter_options()` to `chatter_llm.py` and calls it from **both**
+  `call_llm` and `quick_llm_analyze`. It matters on the hybrid DeepSeek slugs
+  (V3.2, V4), where one model ID serves both modes and reasoning is billed as
+  output tokens — a bot says two sentences in character, so a thinking budget
+  is pure cost plus a risk of `<think>` text leaking into the JSON the bridge
+  parses. Three `sys.exit` guards fail the build if upstream moves the anchor,
+  changes the dispatch, or adds its own OpenRouter reasoning support — in that
+  last case delete the block and use the upstream key rather than patching
+  around it. It is live against the pinned model (OpenRouter lists `reasoning`
+  in that slug's supported parameters) and is silently dropped on a slug that
+  can't reason, so it is safe to leave set across model changes either way.
+  Verify with:
+  `docker run --rm --entrypoint python <bridge-image> -c "import chatter_llm as c; print(c._openrouter_reasoning({'LLMChatter.OpenRouter.Reasoning':'off'}))"`
 - **`Ctrl-C` on the worldserver console stops the realm.** Detach with `Ctrl-P`
   `Ctrl-Q`; `admin.sh` sets `--detach-keys` for this reason.
 - Bot load is tuned by `AiPlayerbot.MinRandomBots` / `MaxRandomBots` (currently
